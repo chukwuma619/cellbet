@@ -2,10 +2,10 @@
   "name": "cellbet",
   "private": true,
   "scripts": {
-    "dev": "pnpm -r --parallel run dev",
+    "dev": "pnpm --parallel --filter @cellbet/shared --filter @cellbet/frontend --filter @cellbet/backend run dev",
     "dev:frontend": "pnpm --filter @cellbet/frontend dev",
     "dev:backend": "pnpm --filter @cellbet/backend dev",
-    "build": "pnpm -r run build",
+    "build": "pnpm --filter @cellbet/shared build && pnpm --filter @cellbet/frontend build && pnpm --filter @cellbet/backend build",
     "lint": "pnpm -r run lint",
     "test": "pnpm --filter @cellbet/backend test"
   },
