@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { CrashHistoryPanel } from "@/components/crash/crash-history-panel";
+import { DemoCreditsCallout } from "@/components/crash/demo-credits-callout";
 import { VerifyFairnessDialog } from "@/components/crash/verify-fairness-dialog";
 import { useCkbAddress } from "@/hooks/use-ckb-address";
 import { useCrashSocket } from "@/hooks/use-crash-socket";
@@ -149,6 +151,7 @@ export function CrashGameClient() {
           <CardTitle className="text-base">Play</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <DemoCreditsCallout />
           {!isConnected && (
             <p className="text-muted-foreground text-sm">
               Connect a CKB wallet to place demo bets (off-chain).
@@ -184,6 +187,13 @@ export function CrashGameClient() {
           </div>
         </CardContent>
       </Card>
+
+      <div className="lg:col-span-3">
+        <CrashHistoryPanel
+          walletAddress={address ?? null}
+          refreshKey={lastSettledRound?.id}
+        />
+      </div>
     </div>
   );
 }

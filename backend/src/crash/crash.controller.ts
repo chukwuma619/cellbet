@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
 } from "@nestjs/common";
 
 import { CashOutDto } from "./dto/cash-out.dto";
@@ -24,6 +25,29 @@ export class CrashController {
   @Get("rounds/:roundId/proof")
   getRoundProof(@Param("roundId") roundId: string) {
     return this.crashService.getRoundProof(roundId);
+  }
+
+  @Get("history/rounds")
+  getRoundHistory(@Query("limit") limit?: string) {
+    const n = limit != null ? Number.parseInt(limit, 10) : 20;
+    return this.crashService.getRecentSettledRounds(
+      Number.isFinite(n) ? n : 20,
+    );
+  }
+
+  @Get("history/bets")
+  getBetHistory(
+    @Query("walletAddress") walletAddress: string | undefined,
+    @Query("limit") limit?: string,
+  ) {
+    if (!walletAddress?.trim()) {
+      throw new BadRequestException("walletAddress is required");
+    }
+    const n = limit != null ? Number.parseInt(limit, 10) : 50;
+    return this.crashService.getRecentBetsForWallet(
+      walletAddress.trim(),
+      Number.isFinite(n) ? n : 50,
+    );
   }
 
   @Post("bets")

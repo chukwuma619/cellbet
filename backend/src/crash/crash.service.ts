@@ -10,7 +10,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomBytes } from "crypto";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import {
   crashBets,
   crashRounds,
@@ -127,6 +127,74 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       serverSeed: row.serverSeed,
       crashMultiplier: crashMult,
       verification,
+    };
+  }
+
+  /** Recent finished rounds for history UI (newest first). */
+  async getRecentSettledRounds(limit: number) {
+    const cap = Math.min(100, Math.max(1, Math.floor(limit)));
+    const rows = await this.db
+      .select({
+        id: crashRounds.id,
+        roundKey: crashRounds.roundKey,
+        crashMultiplier: crashRounds.crashMultiplier,
+        settledAt: crashRounds.settledAt,
+      })
+      .from(crashRounds)
+      .where(eq(crashRounds.phase, "settled"))
+      .orderBy(desc(crashRounds.settledAt))
+      .limit(cap);
+
+    return {
+      rounds: rows.map((row) => ({
+        id: row.id,
+        roundKey: row.roundKey,
+        crashMultiplier:
+          row.crashMultiplier != null ? Number(row.crashMultiplier) : null,
+        settledAt: row.settledAt?.toISOString() ?? null,
+      })),
+    };
+  }
+
+  /** User bet history with round context (newest first). */
+  async getRecentBetsForWallet(walletAddress: string, limit: number) {
+    const cap = Math.min(200, Math.max(1, Math.floor(limit)));
+    const rows = await this.db
+      .select({
+        betId: crashBets.id,
+        roundId: crashBets.roundId,
+        amount: crashBets.amount,
+        status: crashBets.status,
+        cashedOutAtMultiplier: crashBets.cashedOutAtMultiplier,
+        profit: crashBets.profit,
+        createdAt: crashBets.createdAt,
+        roundKey: crashRounds.roundKey,
+        roundPhase: crashRounds.phase,
+        crashMultiplier: crashRounds.crashMultiplier,
+      })
+      .from(crashBets)
+      .innerJoin(crashRounds, eq(crashBets.roundId, crashRounds.id))
+      .where(eq(crashBets.ckbAddress, walletAddress))
+      .orderBy(desc(crashBets.createdAt))
+      .limit(cap);
+
+    return {
+      bets: rows.map((row) => ({
+        betId: row.betId,
+        roundId: row.roundId,
+        roundKey: row.roundKey,
+        roundPhase: row.roundPhase,
+        amount: row.amount != null ? String(row.amount) : "0",
+        status: row.status,
+        cashedOutAtMultiplier:
+          row.cashedOutAtMultiplier != null
+            ? String(row.cashedOutAtMultiplier)
+            : null,
+        profit: row.profit != null ? String(row.profit) : null,
+        crashMultiplier:
+          row.crashMultiplier != null ? Number(row.crashMultiplier) : null,
+        createdAt: row.createdAt.toISOString(),
+      })),
     };
   }
 

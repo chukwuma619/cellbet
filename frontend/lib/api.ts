@@ -60,3 +60,58 @@ export async function postCashOut(walletAddress: string): Promise<unknown> {
   }
   return data;
 }
+
+export type CrashRoundHistoryItem = {
+  id: string;
+  roundKey: string;
+  crashMultiplier: number | null;
+  settledAt: string | null;
+};
+
+export type CrashRoundHistoryResponse = {
+  rounds: CrashRoundHistoryItem[];
+};
+
+export async function fetchCrashRoundHistory(
+  limit = 20,
+): Promise<CrashRoundHistoryResponse> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  const res = await fetch(
+    `${getApiBaseUrl()}/crash/history/rounds?${params}`,
+    { cache: "no-store" },
+  );
+  if (!res.ok) throw new Error("Could not load round history");
+  return res.json() as Promise<CrashRoundHistoryResponse>;
+}
+
+export type CrashBetHistoryItem = {
+  betId: string;
+  roundId: string;
+  roundKey: string;
+  roundPhase: string;
+  amount: string;
+  status: string;
+  cashedOutAtMultiplier: string | null;
+  profit: string | null;
+  crashMultiplier: number | null;
+  createdAt: string;
+};
+
+export type CrashBetHistoryResponse = {
+  bets: CrashBetHistoryItem[];
+};
+
+export async function fetchCrashBetHistory(
+  walletAddress: string,
+  limit = 50,
+): Promise<CrashBetHistoryResponse> {
+  const params = new URLSearchParams({
+    walletAddress,
+    limit: String(limit),
+  });
+  const res = await fetch(`${getApiBaseUrl()}/crash/history/bets?${params}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error("Could not load bet history");
+  return res.json() as Promise<CrashBetHistoryResponse>;
+}
