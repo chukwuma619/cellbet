@@ -16,10 +16,6 @@ export const crashBets = pgTable("crash_bets", {
   ckbAddress: text("ckb_address").notNull(),
   /** Stake amount (same unit as API; decimal string in DB). */
   amount: numeric("amount", { precision: 20, scale: 8 }).notNull(),
-  autoCashoutMultiplier: numeric("auto_cashout_multiplier", {
-    precision: 20,
-    scale: 8,
-  }),
   status: text("status").notNull(),
   cashedOutAtMultiplier: numeric("cashed_out_at_multiplier", {
     precision: 20,

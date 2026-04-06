@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { VerifyFairnessDialog } from "@/components/crash/verify-fairness-dialog";
 import { useCkbAddress } from "@/hooks/use-ckb-address";
@@ -19,8 +18,6 @@ export function CrashGameClient() {
   const { address, isConnected, openConnector } = useCkbAddress();
   const [now, setNow] = useState(() => Date.now());
   const [amount, setAmount] = useState("10");
-  const [autoMult, setAutoMult] = useState(2);
-  const [useAuto, setUseAuto] = useState(false);
   const [hasOpenBet, setHasOpenBet] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -55,7 +52,6 @@ export function CrashGameClient() {
       await postBet({
         walletAddress: address,
         amount: n,
-        autoCashoutMultiplier: useAuto ? autoMult : undefined,
       });
       setHasOpenBet(true);
       toast.success("Bet placed");
@@ -168,32 +164,6 @@ export function CrashGameClient() {
               disabled={!canBet}
             />
           </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="auto"
-              checked={useAuto}
-              onChange={(e) => setUseAuto(e.target.checked)}
-              className="size-4 rounded border"
-            />
-            <Label htmlFor="auto">Auto cash out</Label>
-          </div>
-          {useAuto && (
-            <div className="space-y-2">
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>Target multiplier</span>
-                <span>{autoMult.toFixed(2)}×</span>
-              </div>
-              <Slider
-                value={[autoMult]}
-                min={1.01}
-                max={50}
-                step={0.01}
-                onValueChange={(v) => setAutoMult(v[0] ?? 2)}
-                disabled={!canBet}
-              />
-            </div>
-          )}
           <div className="flex flex-col gap-2">
             <Button
               className="w-full"

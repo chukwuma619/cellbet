@@ -130,11 +130,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async placeBet(
-    walletAddress: string,
-    amount: number,
-    autoCashoutMultiplier?: number,
-  ) {
+  async placeBet(walletAddress: string, amount: number) {
     const r = this.runtime;
     if (!r || r.phase !== "betting" || Date.now() >= r.bettingEndsAt) {
       throw new Error("Betting is closed for this round");
@@ -143,12 +139,6 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     const maxBet = this.config.get<number>("CRASH_MAX_BET", DEFAULT_MAX_BET);
     if (amount < minBet || amount > maxBet) {
       throw new Error(`Amount must be between ${minBet} and ${maxBet}`);
-    }
-    if (
-      autoCashoutMultiplier !== undefined &&
-      (autoCashoutMultiplier < 1.01 || autoCashoutMultiplier > 1000)
-    ) {
-      throw new Error("Invalid auto cash-out multiplier");
     }
 
     await this.db
@@ -165,10 +155,6 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
         roundId: r.dbRoundId,
         ckbAddress: walletAddress,
         amount: String(amount),
-        autoCashoutMultiplier:
-          autoCashoutMultiplier !== undefined
-            ? String(autoCashoutMultiplier)
-            : null,
         status: "pending",
       })
       .returning();
@@ -178,9 +164,6 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       roundId: r.dbRoundId,
       ckbAddress: walletAddress,
       amount: String(amount),
-      autoCashoutMultiplier: autoCashoutMultiplier
-        ? String(autoCashoutMultiplier)
-        : null,
     });
 
     return {
@@ -331,11 +314,11 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     const tickMs = this.config.get<number>("CRASH_TICK_MS", DEFAULT_TICK_MS);
     this.clearTick();
     this.tickTimer = setInterval(() => {
-      void this.tick();
+      this.tick();
     }, tickMs);
   }
 
-  private async tick() {
+  private tick() {
     const r = this.runtime;
     if (!r || r.phase !== "running" || !r.runningStartedAt) return;
     const elapsed = Date.now() - r.runningStartedAt;
@@ -352,47 +335,8 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       elapsedMs: elapsed,
     });
 
-    await this.applyAutoCashouts(mult);
-
     if (elapsed >= r.runningDurationMs) {
       this.goCrashed();
-    }
-  }
-
-  private async applyAutoCashouts(currentMult: number) {
-    const r = this.runtime;
-    if (!r || r.phase !== "running") return;
-    const pending = await this.db
-      .select()
-      .from(crashBets)
-      .where(
-        and(
-          eq(crashBets.roundId, r.dbRoundId),
-          eq(crashBets.status, "pending"),
-        ),
-      );
-    for (const bet of pending) {
-      if (!bet.autoCashoutMultiplier) continue;
-      const target = Number(bet.autoCashoutMultiplier);
-      if (currentMult >= target && target < r.crashMultiplier) {
-        const stake = Number(bet.amount);
-        const profit = stake * (target - 1);
-        await this.db
-          .update(crashBets)
-          .set({
-            status: "cashed_out",
-            cashedOutAtMultiplier: String(target),
-            profit: String(profit),
-          })
-          .where(eq(crashBets.id, bet.id));
-        this.gateway.emitCashOut({
-          betId: bet.id,
-          ckbAddress: bet.ckbAddress,
-          cashedOutAtMultiplier: target,
-          profit,
-          auto: true,
-        });
-      }
     }
   }
 

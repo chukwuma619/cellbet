@@ -25,7 +25,6 @@ export async function fetchCrashRoundProof(roundId: string): Promise<unknown> {
 export async function postBet(body: {
   walletAddress: string;
   amount: number;
-  autoCashoutMultiplier?: number;
 }): Promise<unknown> {
   const res = await fetch(`${getApiBaseUrl()}/crash/bets`, {
     method: "POST",
