@@ -5,11 +5,18 @@ import { App } from 'supertest/types';
 import type { NeonDrizzle } from '@cellbet/shared/db';
 
 import { AppModule } from './../src/app.module';
+import { CrashService } from './../src/crash/crash.service';
 import { DRIZZLE } from './../src/database/database.tokens';
 
 const mockDb = {
   execute: jest.fn().mockResolvedValue(undefined),
 } as unknown as NeonDrizzle;
+
+const crashServiceStub = {
+  onModuleInit: () => undefined,
+  onModuleDestroy: () => undefined,
+  getPublicSnapshot: () => ({ round: null }),
+};
 
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
@@ -20,6 +27,8 @@ describe('AppController (e2e)', () => {
     })
       .overrideProvider(DRIZZLE)
       .useValue(mockDb)
+      .overrideProvider(CrashService)
+      .useValue(crashServiceStub)
       .compile();
 
     app = moduleFixture.createNestApplication();
