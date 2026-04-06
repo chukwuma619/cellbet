@@ -9,12 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
+import { VerifyFairnessDialog } from "@/components/crash/verify-fairness-dialog";
 import { useCkbAddress } from "@/hooks/use-ckb-address";
 import { useCrashSocket } from "@/hooks/use-crash-socket";
 import { postBet, postCashOut } from "@/lib/api";
 
 export function CrashGameClient() {
-  const { round, connected } = useCrashSocket();
+  const { round, connected, lastSettledRound } = useCrashSocket();
   const { address, isConnected, openConnector } = useCkbAddress();
   const [now, setNow] = useState(() => Date.now());
   const [amount, setAmount] = useState("10");
@@ -87,6 +88,10 @@ export function CrashGameClient() {
     mult > 0 &&
     !submitting;
 
+  const proofRound =
+    lastSettledRound ??
+    (round?.phase === "settled" && round.serverSeed ? round : null);
+
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <Card className="border-border/80 lg:col-span-2">
@@ -140,11 +145,6 @@ export function CrashGameClient() {
               </>
             )}
           </div>
-          {round?.serverSeed && phase === "settled" && (
-            <p className="text-muted-foreground font-mono text-xs break-all">
-              Server seed (verify): {round.serverSeed}
-            </p>
-          )}
         </CardContent>
       </Card>
 
@@ -210,6 +210,7 @@ export function CrashGameClient() {
             >
               Cash out
             </Button>
+            <VerifyFairnessDialog round={proofRound} />
           </div>
         </CardContent>
       </Card>

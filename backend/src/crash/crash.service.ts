@@ -1,8 +1,10 @@
 import {
+  BadRequestException,
   forwardRef,
   Inject,
   Injectable,
   Logger,
+  NotFoundException,
   OnModuleDestroy,
   OnModuleInit,
 } from "@nestjs/common";
@@ -25,6 +27,7 @@ import {
   multiplierAtElapsed,
   randomServerSeed,
   sha256Hex,
+  verifyCrashRound,
 } from "./crash.utils";
 
 const DEFAULT_BETTING_SECONDS = 10;
@@ -90,6 +93,40 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
             : undefined,
         serverSeed: r.phase === "settled" ? r.serverSeed : undefined,
       },
+    };
+  }
+
+  /** Provably-fair proof for a settled round (works after newer rounds have started). */
+  async getRoundProof(roundId: string) {
+    const [row] = await this.db
+      .select()
+      .from(crashRounds)
+      .where(eq(crashRounds.id, roundId))
+      .limit(1);
+    if (!row) throw new NotFoundException("Round not found");
+    if (!row.serverSeed) {
+      throw new BadRequestException(
+        "Round not revealed yet (still in progress or missing server seed)",
+      );
+    }
+    const crashMult =
+      row.crashMultiplier != null ? Number(row.crashMultiplier) : NaN;
+    if (!Number.isFinite(crashMult)) {
+      throw new BadRequestException("Round outcome not finalized");
+    }
+    const verification = verifyCrashRound({
+      serverSeed: row.serverSeed,
+      roundKey: row.roundKey,
+      serverSeedHash: row.serverSeedHash,
+      crashMultiplier: crashMult,
+    });
+    return {
+      roundId: row.id,
+      roundKey: row.roundKey,
+      serverSeedHash: row.serverSeedHash,
+      serverSeed: row.serverSeed,
+      crashMultiplier: crashMult,
+      verification,
     };
   }
 

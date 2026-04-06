@@ -1,0 +1,13 @@
+[package]
+name = "crash-commit-reveal"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+blake2 = { version = "0.10", default-features = false }
+ckb-std = "1.1"
+digest = { version = "0.10", default-features = false }
+
+[features]
+library = []
+native-simulator = ["library", "ckb-std/native-simulator"]

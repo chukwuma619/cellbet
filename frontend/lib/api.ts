@@ -12,6 +12,16 @@ export async function fetchCrashState(): Promise<unknown> {
   return res.json();
 }
 
+/** Settled-round commit-reveal proof (same checks as client-side `verifyCrashRound`). */
+export async function fetchCrashRoundProof(roundId: string): Promise<unknown> {
+  const res = await fetch(
+    `${getApiBaseUrl()}/crash/rounds/${encodeURIComponent(roundId)}/proof`,
+    { cache: "no-store" },
+  );
+  if (!res.ok) throw new Error("Could not load round proof");
+  return res.json();
+}
+
 export async function postBet(body: {
   walletAddress: string;
   amount: number;

@@ -48,6 +48,9 @@ function normalizeRound(
 export function useCrashSocket() {
   const [connected, setConnected] = useState(false);
   const [round, setRound] = useState<CrashRoundPublic | null>(null);
+  /** Kept after a new round starts so “Verify fairness” still has seed + keys. */
+  const [lastSettledRound, setLastSettledRound] =
+    useState<CrashRoundPublic | null>(null);
 
   useEffect(() => {
     void fetchCrashState()
@@ -57,6 +60,16 @@ export function useCrashSocket() {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (
+      round?.phase === "settled" &&
+      round.serverSeed &&
+      round.crashMultiplier !== undefined
+    ) {
+      setLastSettledRound(round);
+    }
+  }, [round]);
 
   useEffect(() => {
     const base = getApiBaseUrl();
@@ -133,5 +146,5 @@ export function useCrashSocket() {
     };
   }, []);
 
-  return { connected, round };
+  return { connected, round, lastSettledRound };
 }
