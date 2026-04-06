@@ -2,7 +2,14 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import type { NeonDrizzle } from '@cellbet/shared/db';
+
 import { AppModule } from './../src/app.module';
+import { DRIZZLE } from './../src/database/database.tokens';
+
+const mockDb = {
+  execute: jest.fn().mockResolvedValue(undefined),
+} as unknown as NeonDrizzle;
 
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
@@ -10,7 +17,10 @@ describe('AppController (e2e)', () => {
   beforeEach(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(DRIZZLE)
+      .useValue(mockDb)
+      .compile();
 
     app = moduleFixture.createNestApplication();
     await app.init();
