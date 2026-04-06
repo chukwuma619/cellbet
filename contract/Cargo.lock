@@ -1750,6 +1750,7 @@ dependencies = [
  "ckb-testtool",
  "digest",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
