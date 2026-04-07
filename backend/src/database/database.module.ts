@@ -1,6 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createNeonDrizzle } from '../db';
+import { createNeonDrizzle, type NeonDrizzle } from '../db/client';
 
 import { DRIZZLE } from './database.tokens';
 
@@ -10,7 +10,7 @@ import { DRIZZLE } from './database.tokens';
     {
       provide: DRIZZLE,
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => {
+      useFactory: (config: ConfigService): NeonDrizzle => {
         const url = config.get<string>('DATABASE_URL');
         if (!url) {
           throw new Error(
