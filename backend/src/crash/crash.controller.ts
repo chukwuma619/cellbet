@@ -18,7 +18,7 @@ export class CrashController {
 
   @Get("state")
   getState() {
-    return this.crashService.getPublicSnapshot();
+    return this.crashService.getPublicSnapshotAsync();
   }
 
   @Get("rounds/:roundId/proof")

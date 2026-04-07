@@ -17,6 +17,66 @@ export type CrashRoundPublic = {
   combinedClientSeed?: string;
 };
 
+export type CrashParticipant = {
+  betId: string;
+  roundId: string;
+  ckbAddress: string;
+  amount: string;
+  tokenSymbol: string;
+  status: string;
+  cashedOutAtMultiplier?: number;
+  winAmount?: number;
+};
+
+function normalizeParticipants(raw: unknown): CrashParticipant[] {
+  if (!Array.isArray(raw)) return [];
+  const out: CrashParticipant[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const betId = o.betId != null ? String(o.betId) : "";
+    const roundId = o.roundId != null ? String(o.roundId) : "";
+    const ckbAddress = o.ckbAddress != null ? String(o.ckbAddress) : "";
+    if (!betId || !ckbAddress) continue;
+    const amount = o.amount != null ? String(o.amount) : "0";
+    const tokenSymbol =
+      o.tokenSymbol != null ? String(o.tokenSymbol) : "CKB";
+    const status = o.status != null ? String(o.status) : "pending";
+    const multRaw = o.cashedOutAtMultiplier;
+    const cashedOutAtMultiplier =
+      typeof multRaw === "number"
+        ? multRaw
+        : multRaw != null
+          ? Number(multRaw)
+          : undefined;
+    const winRaw = o.winAmount;
+    const winAmount =
+      typeof winRaw === "number"
+        ? winRaw
+        : winRaw != null
+          ? Number(winRaw)
+          : undefined;
+    out.push({
+      betId,
+      roundId,
+      ckbAddress,
+      amount,
+      tokenSymbol,
+      status,
+      cashedOutAtMultiplier:
+        cashedOutAtMultiplier !== undefined &&
+        Number.isFinite(cashedOutAtMultiplier)
+          ? cashedOutAtMultiplier
+          : undefined,
+      winAmount:
+        winAmount !== undefined && Number.isFinite(winAmount)
+          ? winAmount
+          : undefined,
+    });
+  }
+  return out;
+}
+
 function normalizeRound(
   raw: Record<string, unknown> | null | undefined,
 ): CrashRoundPublic | null {
@@ -53,6 +113,7 @@ function normalizeRound(
 export function useCrashSocket() {
   const [connected, setConnected] = useState(false);
   const [round, setRound] = useState<CrashRoundPublic | null>(null);
+  const [participants, setParticipants] = useState<CrashParticipant[]>([]);
   /** Kept after a new round starts so “Verify fairness” still has seed + keys. */
   const [lastSettledRound, setLastSettledRound] =
     useState<CrashRoundPublic | null>(null);
@@ -60,8 +121,12 @@ export function useCrashSocket() {
   useEffect(() => {
     void fetchCrashState()
       .then((data) => {
-        const d = data as { round?: Record<string, unknown> | null };
+        const d = data as {
+          round?: Record<string, unknown> | null;
+          participants?: unknown;
+        };
         setRound(normalizeRound(d.round ?? null));
+        setParticipants(normalizeParticipants(d.participants));
       })
       .catch(() => {});
   }, []);
@@ -88,8 +153,68 @@ export function useCrashSocket() {
     socket.on("connect", () => setConnected(true));
     socket.on("disconnect", () => setConnected(false));
 
-    socket.on("crash:state", (payload: { round?: Record<string, unknown> }) => {
-      setRound(normalizeRound(payload.round ?? null));
+    socket.on(
+      "crash:state",
+      (payload: {
+        round?: Record<string, unknown>;
+        participants?: unknown;
+      }) => {
+        setRound(normalizeRound(payload.round ?? null));
+        setParticipants(normalizeParticipants(payload.participants));
+      },
+    );
+
+    socket.on("crash:bet_placed", (payload: Record<string, unknown>) => {
+      const betId = payload.betId != null ? String(payload.betId) : "";
+      const roundId = payload.roundId != null ? String(payload.roundId) : "";
+      const ckbAddress =
+        payload.ckbAddress != null ? String(payload.ckbAddress) : "";
+      const amount = payload.amount != null ? String(payload.amount) : "0";
+      const tokenSymbol =
+        payload.tokenSymbol != null ? String(payload.tokenSymbol) : "CKB";
+      if (!betId || !ckbAddress) return;
+      setParticipants((prev) => {
+        if (prev.some((p) => p.betId === betId)) return prev;
+        return [
+          ...prev,
+          {
+            betId,
+            roundId,
+            ckbAddress,
+            amount,
+            tokenSymbol,
+            status: "pending",
+          },
+        ];
+      });
+    });
+
+    socket.on("crash:cash_out", (payload: Record<string, unknown>) => {
+      const betId = payload.betId != null ? String(payload.betId) : "";
+      const roundId = payload.roundId != null ? String(payload.roundId) : "";
+      const mult = payload.cashedOutAtMultiplier;
+      const cashedOutAtMultiplier =
+        typeof mult === "number" ? mult : mult != null ? Number(mult) : NaN;
+      const winRaw = payload.winAmount;
+      const winAmount =
+        typeof winRaw === "number"
+          ? winRaw
+          : winRaw != null
+            ? Number(winRaw)
+            : NaN;
+      if (!betId || !Number.isFinite(cashedOutAtMultiplier)) return;
+      setParticipants((prev) =>
+        prev.map((p) => {
+          if (p.betId !== betId) return p;
+          if (roundId && p.roundId && p.roundId !== roundId) return p;
+          return {
+            ...p,
+            status: "cashed_out",
+            cashedOutAtMultiplier,
+            winAmount: Number.isFinite(winAmount) ? winAmount : undefined,
+          };
+        }),
+      );
     });
 
     socket.on("crash:phase", (payload: Record<string, unknown>) => {
@@ -160,5 +285,5 @@ export function useCrashSocket() {
     };
   }, []);
 
-  return { connected, round, lastSettledRound };
+  return { connected, round, lastSettledRound, participants };
 }

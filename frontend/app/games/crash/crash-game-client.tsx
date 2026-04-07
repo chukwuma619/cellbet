@@ -8,11 +8,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCkbAddress } from "@/hooks/use-ckb-address";
+import { CrashParticipantsTable } from "@/components/crash/crash-participants-table";
 import { useCrashSocket } from "@/hooks/use-crash-socket";
 import { postBet, postCashOut } from "@/lib/api";
 
 export function CrashGameClient() {
-  const { round } = useCrashSocket();
+  const { round, participants } = useCrashSocket();
   const { address, isConnected, openConnector } = useCkbAddress();
   const [now, setNow] = useState(() => Date.now());
   const [amount, setAmount] = useState("10");
@@ -208,7 +209,11 @@ export function CrashGameClient() {
       </div>
 
       <div className="col-span-1 order-2 md:order-1">
-
+        <Card className="border-border/80">
+          <CardContent className="pt-6">
+            <CrashParticipantsTable participants={participants} />
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

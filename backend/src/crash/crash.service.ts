@@ -38,6 +38,19 @@ const DEFAULT_MIN_BET = 1;
 const DEFAULT_MAX_BET = 100_000;
 const SETTLE_PAUSE_MS = 2500;
 
+export type CrashParticipantPublic = {
+  betId: string;
+  roundId: string;
+  ckbAddress: string;
+  amount: string;
+  /** Display label for the staked asset (e.g. CKB, future UDT symbols). */
+  tokenSymbol: string;
+  status: string;
+  cashedOutAtMultiplier?: number;
+  /** Total payout on cash-out (stake × multiplier). */
+  winAmount?: number;
+};
+
 interface RuntimeRound {
   dbRoundId: string;
   roundKey: string;
@@ -80,7 +93,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
 
   getPublicSnapshot() {
     const r = this.runtime;
-    if (!r) return { round: null as null };
+    if (!r) return { round: null as null, participants: [] as CrashParticipantPublic[] };
     return {
       round: {
         id: r.dbRoundId,
@@ -97,7 +110,80 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
         combinedClientSeed:
           r.phase === "settled" ? r.combinedClientSeed : undefined,
       },
+      participants: [] as CrashParticipantPublic[],
     };
+  }
+
+  /** Full snapshot including everyone who bet in the current round (for UI + reconnects). */
+  async getPublicSnapshotAsync(): Promise<{
+    round: {
+      id: string;
+      roundKey: string;
+      phase: string;
+      serverSeedHash: string;
+      bettingEndsAt: number;
+      currentMultiplier: number;
+      crashMultiplier?: number;
+      serverSeed?: string;
+      combinedClientSeed?: string;
+    } | null;
+    participants: CrashParticipantPublic[];
+  }> {
+    const base = this.getPublicSnapshot();
+    const r = this.runtime;
+    if (!r || !base.round) {
+      return { round: base.round, participants: [] };
+    }
+
+    const rows = await this.db
+      .select({
+        id: crashBets.id,
+        ckbAddress: crashBets.ckbAddress,
+        amount: crashBets.amount,
+        status: crashBets.status,
+        cashedOutAtMultiplier: crashBets.cashedOutAtMultiplier,
+      })
+      .from(crashBets)
+      .where(eq(crashBets.roundId, r.dbRoundId))
+      .orderBy(asc(crashBets.createdAt));
+
+    const participants: CrashParticipantPublic[] = rows.map((row) => {
+      const amountStr =
+        row.amount != null ? String(row.amount) : "0";
+      const mult =
+        row.cashedOutAtMultiplier != null
+          ? Number(row.cashedOutAtMultiplier)
+          : undefined;
+      const cashedOut =
+        row.status === "cashed_out" &&
+        mult !== undefined &&
+        Number.isFinite(mult);
+      const stake = Number(amountStr);
+      return {
+        betId: row.id,
+        roundId: r.dbRoundId,
+        ckbAddress: row.ckbAddress,
+        amount: amountStr,
+        tokenSymbol: "CKB",
+        status: row.status,
+        cashedOutAtMultiplier: cashedOut ? mult : undefined,
+        winAmount:
+          cashedOut && Number.isFinite(stake)
+            ? stake * mult!
+            : undefined,
+      };
+    });
+
+    return { round: base.round, participants };
+  }
+
+  private async pushPublicState() {
+    try {
+      const snap = await this.getPublicSnapshotAsync();
+      this.gateway.emitState(snap);
+    } catch (err) {
+      this.logger.error("pushPublicState failed", err);
+    }
   }
 
   async getRoundProof(roundId: string) {
@@ -239,6 +325,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       roundId: r.dbRoundId,
       ckbAddress: walletAddress,
       amount: String(amount),
+      tokenSymbol: "CKB",
     });
 
     return {
@@ -280,9 +367,13 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
 
     this.gateway.emitCashOut({
       betId: bet.id,
+      roundId: r.dbRoundId,
       ckbAddress: walletAddress,
+      amount: String(bet.amount),
+      tokenSymbol: "CKB",
       cashedOutAtMultiplier: mult,
       profit,
+      winAmount: stake * mult,
     });
 
     return { betId: bet.id, cashedOutAtMultiplier: mult, profit };
@@ -344,6 +435,8 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       serverSeedHash,
       bettingEndsAt,
     });
+
+    void this.pushPublicState();
 
     const untilBettingEnds = Math.max(0, bettingEndsAt - Date.now());
     this.schedulePhase(() => {

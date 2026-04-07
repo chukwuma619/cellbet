@@ -15,7 +15,9 @@ const mockDb = {
 const crashServiceStub = {
   onModuleInit: () => undefined,
   onModuleDestroy: () => undefined,
-  getPublicSnapshot: () => ({ round: null }),
+  getPublicSnapshot: () => ({ round: null, participants: [] }),
+  getPublicSnapshotAsync: () =>
+    Promise.resolve({ round: null, participants: [] }),
 };
 
 describe('AppController (e2e)', () => {

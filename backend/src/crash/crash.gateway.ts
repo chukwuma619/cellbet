@@ -26,13 +26,14 @@ export class CrashGateway implements OnGatewayConnection {
     private readonly crashService: CrashService,
   ) {}
 
-  handleConnection(client: Socket) {
-    client.emit("crash:state", this.crashService.getPublicSnapshot());
+  async handleConnection(client: Socket) {
+    const snap = await this.crashService.getPublicSnapshotAsync();
+    client.emit("crash:state", snap);
   }
 
   @SubscribeMessage("crash:get_state")
-  getState() {
-    return this.crashService.getPublicSnapshot();
+  async getState() {
+    return this.crashService.getPublicSnapshotAsync();
   }
 
   @SubscribeMessage("crash:ping")
@@ -62,5 +63,9 @@ export class CrashGateway implements OnGatewayConnection {
 
   emitCashOut(payload: unknown) {
     this.server.emit("crash:cash_out", payload);
+  }
+
+  emitState(payload: unknown) {
+    this.server.emit("crash:state", payload);
   }
 }
