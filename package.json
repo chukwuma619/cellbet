@@ -8,10 +8,10 @@
     "build": "pnpm --filter @cellbet/shared build && pnpm --filter @cellbet/frontend build && pnpm --filter @cellbet/backend build && pnpm --filter @cellbet/contract build",
     "lint": "pnpm -r run lint",
     "test": "pnpm --filter @cellbet/backend --filter @cellbet/contract test",
-    "db:generate": "pnpm --filter @cellbet/shared db:generate",
-    "db:migrate": "pnpm --filter @cellbet/shared db:migrate",
-    "db:push": "pnpm --filter @cellbet/shared db:push",
-    "db:studio": "pnpm --filter @cellbet/shared db:studio"
+    "db:generate": "pnpm --filter @cellbet/backend db:generate",
+    "db:migrate": "pnpm --filter @cellbet/backend db:migrate",
+    "db:push": "pnpm --filter @cellbet/backend db:push",
+    "db:studio": "pnpm --filter @cellbet/backend db:studio"
   },
   "packageManager": "pnpm@9.15.9",
   "pnpm": {

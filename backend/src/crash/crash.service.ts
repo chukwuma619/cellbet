@@ -22,7 +22,7 @@ import {
   crashRounds,
   type NeonDrizzle,
   walletAccounts,
-} from '@cellbet/shared/db';
+} from '../db';
 import type { CrashPhase } from '@cellbet/shared/types';
 
 import { CrashOnchainService } from '../ckb/crash-onchain.service';

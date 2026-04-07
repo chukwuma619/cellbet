@@ -1,6 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createNeonDrizzle } from '@cellbet/shared/db';
+import { createNeonDrizzle } from '../db';
 
 import { DRIZZLE } from './database.tokens';
 

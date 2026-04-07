@@ -1,8 +1,8 @@
-import { neon } from "@neondatabase/serverless";
-import { sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/neon-http";
+import { neon } from '@neondatabase/serverless';
+import { sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/neon-http';
 
-import * as schema from "./schema";
+import * as schema from './schema';
 
 export function createNeonDrizzle(connectionString: string) {
   const httpSql = neon(connectionString);

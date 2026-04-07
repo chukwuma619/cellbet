@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import type { NeonDrizzle } from '@cellbet/shared/db';
+import type { NeonDrizzle } from './db';
 
 import { AppController } from './app.controller';
 import { AppService } from './app.service';

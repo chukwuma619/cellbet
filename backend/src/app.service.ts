@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { pingDatabase, type NeonDrizzle } from '@cellbet/shared/db';
+import { pingDatabase, type NeonDrizzle } from './db';
 
 import { DRIZZLE } from './database/database.tokens';
 
