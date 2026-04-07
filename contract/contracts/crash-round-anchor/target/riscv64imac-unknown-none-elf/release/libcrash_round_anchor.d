@@ -1,0 +1,1 @@
+/Users/ebube/Desktop/Personal/cellbet/contract/contracts/crash-round-anchor//target/riscv64imac-unknown-none-elf/release/libcrash_round_anchor.rlib: /Users/ebube/Desktop/Personal/cellbet/contract/contracts/crash-round-anchor/src/lib.rs

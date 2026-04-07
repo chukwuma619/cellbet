@@ -1,6 +1,7 @@
 import { randomBytes } from "crypto";
 
 export {
+  combineClientSeedsOrdered,
   computeCrashMultiplier,
   computeRunningDurationMs,
   multiplierAtElapsed,

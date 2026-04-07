@@ -53,7 +53,11 @@ export class CrashController {
   @Post("bets")
   async placeBet(@Body() body: PlaceBetDto) {
     try {
-      return await this.crashService.placeBet(body.walletAddress, body.amount);
+      return await this.crashService.placeBet(
+        body.walletAddress,
+        body.amount,
+        body.clientSeed,
+      );
     } catch (e) {
       throw new BadRequestException(
         e instanceof Error ? e.message : "Could not place bet",

@@ -14,6 +14,8 @@ export type CrashRoundPublic = {
   currentMultiplier: number;
   crashMultiplier?: number;
   serverSeed?: string;
+  /** Combined bet client seeds (§4.9), revealed with server seed when settled. */
+  combinedClientSeed?: string;
 };
 
 function normalizeRound(
@@ -42,6 +44,10 @@ function normalizeRound(
       raw.serverSeed !== undefined && raw.serverSeed !== null
         ? String(raw.serverSeed)
         : undefined,
+    combinedClientSeed:
+      raw.combinedClientSeed !== undefined && raw.combinedClientSeed !== null
+        ? String(raw.combinedClientSeed)
+        : undefined,
   };
 }
 
@@ -67,8 +73,10 @@ export function useCrashSocket() {
       round.serverSeed &&
       round.crashMultiplier !== undefined
     ) {
-      setLastSettledRound(round);
+      const t = setTimeout(() => setLastSettledRound(round), 0);
+      return () => clearTimeout(t);
     }
+    return undefined;
   }, [round]);
 
   useEffect(() => {
@@ -97,6 +105,7 @@ export function useCrashSocket() {
           currentMultiplier: prev?.currentMultiplier ?? 1,
           crashMultiplier: prev?.crashMultiplier,
           serverSeed: prev?.serverSeed,
+          combinedClientSeed: prev?.combinedClientSeed,
         };
         return normalizeRound(merged);
       });
@@ -128,7 +137,11 @@ export function useCrashSocket() {
 
     socket.on(
       "crash:settled",
-      (payload: { serverSeed?: string; crashMultiplier?: number }) => {
+      (payload: {
+        serverSeed?: string;
+        crashMultiplier?: number;
+        combinedClientSeed?: string;
+      }) => {
         setRound((prev) => {
           if (!prev) return prev;
           return {
@@ -136,6 +149,8 @@ export function useCrashSocket() {
             phase: "settled",
             serverSeed: payload.serverSeed ?? prev.serverSeed,
             crashMultiplier: payload.crashMultiplier ?? prev.crashMultiplier,
+            combinedClientSeed:
+              payload.combinedClientSeed ?? prev.combinedClientSeed,
           };
         });
       },

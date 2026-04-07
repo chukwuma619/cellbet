@@ -10,7 +10,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { randomBytes } from "crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import {
   crashBets,
   crashRounds,
@@ -22,6 +22,7 @@ import type { CrashBetStatus, CrashPhase } from "@cellbet/shared/types";
 import { DRIZZLE } from "../database/database.tokens";
 import { CrashGateway } from "./crash.gateway";
 import {
+  combineClientSeedsOrdered,
   computeCrashMultiplier,
   computeRunningDurationMs,
   multiplierAtElapsed,
@@ -43,6 +44,8 @@ interface RuntimeRound {
   phase: CrashPhase;
   serverSeed: string;
   serverSeedHash: string;
+  /** Set when entering `locked` from combined bet client seeds (§4.9). */
+  combinedClientSeed: string;
   crashMultiplier: number;
   runningDurationMs: number;
   bettingEndsAt: number;
@@ -92,6 +95,8 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
             ? r.crashMultiplier
             : undefined,
         serverSeed: r.phase === "settled" ? r.serverSeed : undefined,
+        combinedClientSeed:
+          r.phase === "settled" ? r.combinedClientSeed : undefined,
       },
     };
   }
@@ -114,17 +119,20 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     if (!Number.isFinite(crashMult)) {
       throw new BadRequestException("Round outcome not finalized");
     }
+    const combined = row.combinedClientSeed ?? "";
     const verification = verifyCrashRound({
       serverSeed: row.serverSeed,
       roundKey: row.roundKey,
       serverSeedHash: row.serverSeedHash,
       crashMultiplier: crashMult,
+      clientSeed: combined,
     });
     return {
       roundId: row.id,
       roundKey: row.roundKey,
       serverSeedHash: row.serverSeedHash,
       serverSeed: row.serverSeed,
+      combinedClientSeed: combined,
       crashMultiplier: crashMult,
       verification,
     };
@@ -198,7 +206,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async placeBet(walletAddress: string, amount: number) {
+  async placeBet(walletAddress: string, amount: number, clientSeed?: string) {
     const r = this.runtime;
     if (!r || r.phase !== "betting" || Date.now() >= r.bettingEndsAt) {
       throw new Error("Betting is closed for this round");
@@ -208,6 +216,10 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     if (amount < minBet || amount > maxBet) {
       throw new Error(`Amount must be between ${minBet} and ${maxBet}`);
     }
+    const seed =
+      clientSeed !== undefined && clientSeed !== null
+        ? clientSeed.trim().slice(0, 256)
+        : null;
 
     await this.db
       .insert(walletAccounts)
@@ -222,6 +234,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       .values({
         roundId: r.dbRoundId,
         ckbAddress: walletAddress,
+        clientSeed: seed && seed.length > 0 ? seed : null,
         amount: String(amount),
         status: "pending",
       })
@@ -300,8 +313,6 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     const serverSeed = randomServerSeed();
     const roundKey = `r-${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`;
     const serverSeedHash = sha256Hex(serverSeed);
-    const crashMultiplier = computeCrashMultiplier(serverSeed, roundKey);
-    const runningDurationMs = computeRunningDurationMs(serverSeed, roundKey);
     const bettingSeconds = this.config.get<number>(
       "CRASH_BETTING_SECONDS",
       DEFAULT_BETTING_SECONDS,
@@ -324,8 +335,9 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       phase: "betting",
       serverSeed,
       serverSeedHash,
-      crashMultiplier,
-      runningDurationMs,
+      combinedClientSeed: "",
+      crashMultiplier: 0,
+      runningDurationMs: 0,
       bettingEndsAt,
       runningStartedAt: null,
       currentMultiplier: 1,
@@ -340,17 +352,41 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     });
 
     const untilBettingEnds = Math.max(0, bettingEndsAt - Date.now());
-    this.schedulePhase(() => this.goLocked(), untilBettingEnds);
+    this.schedulePhase(() => {
+      void this.goLockedAsync();
+    }, untilBettingEnds);
   }
 
-  private goLocked() {
+  private async goLockedAsync() {
     const r = this.runtime;
     if (!r || r.phase !== "betting") return;
     r.phase = "locked";
-    void this.db
+    await this.db
       .update(crashRounds)
       .set({ phase: "locked", lockedAt: new Date() })
       .where(eq(crashRounds.id, r.dbRoundId));
+
+    const betRows = await this.db
+      .select({ clientSeed: crashBets.clientSeed })
+      .from(crashBets)
+      .where(eq(crashBets.roundId, r.dbRoundId))
+      .orderBy(asc(crashBets.createdAt));
+
+    const parts = betRows.map((b) => b.clientSeed ?? "");
+    const combined = combineClientSeedsOrdered(parts);
+    r.combinedClientSeed = combined;
+    r.crashMultiplier = computeCrashMultiplier(r.serverSeed, r.roundKey, combined);
+    r.runningDurationMs = computeRunningDurationMs(
+      r.serverSeed,
+      r.roundKey,
+      combined,
+    );
+
+    await this.db
+      .update(crashRounds)
+      .set({ combinedClientSeed: combined })
+      .where(eq(crashRounds.id, r.dbRoundId));
+
     this.gateway.emitPhase({
       phase: "locked",
       roundId: r.dbRoundId,
@@ -471,6 +507,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       roundKey: r.roundKey,
       crashMultiplier: r.crashMultiplier,
       serverSeed: r.serverSeed,
+      combinedClientSeed: r.combinedClientSeed,
     });
 
     this.schedulePhase(() => {

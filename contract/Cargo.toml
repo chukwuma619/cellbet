@@ -9,7 +9,12 @@ members = [
 ]
 
 # Standalone no_std crates built via contracts/*/Makefile (riscv64imac).
-exclude = ["contracts/crash-commit-reveal", "contracts/crash-seed-commit-sha256"]
+exclude = [
+  "contracts/crash-commit-reveal",
+  "contracts/crash-seed-commit-sha256",
+  "contracts/crash-round-anchor",
+  "contracts/crash-settlement-split",
+]
 
 [profile.release]
 overflow-checks = true

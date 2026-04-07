@@ -38,6 +38,7 @@ export function VerifyFairnessDialog({ round }: Props) {
       roundKey: round.roundKey,
       serverSeedHash: round.serverSeedHash,
       crashMultiplier: round.crashMultiplier,
+      clientSeed: round.combinedClientSeed ?? "",
     });
   }, [round]);
 
@@ -95,10 +96,10 @@ export function VerifyFairnessDialog({ round }: Props) {
         <DialogHeader>
           <DialogTitle>Provably fair</DialogTitle>
           <DialogDescription>
-            The crash point is fixed before the round runs. We publish{" "}
-            <code className="text-xs">SHA-256(server seed)</code> during betting,
-            then reveal the server seed after the round. You can recompute the
-            multiplier from the seed and round key.
+            We publish <code className="text-xs">SHA-256(server seed)</code>{" "}
+            during betting. After betting closes, client seeds from bets are
+            combined and mixed into the outcome (§4.9). After settle we reveal the
+            server seed so you can verify the crash multiplier.
           </DialogDescription>
         </DialogHeader>
         {local && round && (
@@ -144,6 +145,17 @@ export function VerifyFairnessDialog({ round }: Props) {
             <div className="space-y-1">
               <p className="text-muted-foreground font-medium">Server seed (revealed)</p>
               <p className="font-mono break-all">{round.serverSeed}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-muted-foreground font-medium">
+                Combined client seed (§4.9)
+              </p>
+              <p className="font-mono break-all">
+                {round.combinedClientSeed === undefined ||
+                round.combinedClientSeed === ""
+                  ? "— (none)"
+                  : round.combinedClientSeed}
+              </p>
             </div>
             <Button
               type="button"

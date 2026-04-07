@@ -13,6 +13,11 @@ export const crashRounds = pgTable("crash_rounds", {
   phase: text("phase").notNull(),
   serverSeedHash: text("server_seed_hash").notNull(),
   serverSeed: text("server_seed"),
+  /**
+   * UTF-8 seeds from bets in `created_at` order, joined with U+001E (record separator).
+   * Empty string if no bets or all seeds empty. Mixed into §4.3 outcome with server seed + round key.
+   */
+  combinedClientSeed: text("combined_client_seed").notNull().default(""),
   /** Crash point multiplier (e.g. 2.47). Set when phase becomes crashed/settled. */
   crashMultiplier: numeric("crash_multiplier", {
     precision: 20,

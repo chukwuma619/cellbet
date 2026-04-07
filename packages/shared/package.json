@@ -21,6 +21,10 @@
     "./utils": {
       "types": "./dist/utils/index.d.ts",
       "default": "./dist/utils/index.js"
+    },
+    "./ckb": {
+      "types": "./dist/ckb/index.d.ts",
+      "default": "./dist/ckb/index.js"
     }
   },
   "scripts": {

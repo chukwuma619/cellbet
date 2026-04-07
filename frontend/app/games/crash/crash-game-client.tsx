@@ -20,6 +20,8 @@ export function CrashGameClient() {
   const { address, isConnected, openConnector } = useCkbAddress();
   const [now, setNow] = useState(() => Date.now());
   const [amount, setAmount] = useState("10");
+  /** Optional entropy for provably fair outcome (§4.9); sent with bet. */
+  const [clientSeed, setClientSeed] = useState("");
   const [hasOpenBet, setHasOpenBet] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -54,6 +56,7 @@ export function CrashGameClient() {
       await postBet({
         walletAddress: address,
         amount: n,
+        ...(clientSeed.trim() ? { clientSeed: clientSeed.trim() } : {}),
       });
       setHasOpenBet(true);
       toast.success("Bet placed");
@@ -166,6 +169,22 @@ export function CrashGameClient() {
               onChange={(e) => setAmount(e.target.value)}
               disabled={!canBet}
             />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="client-seed">Client seed (optional)</Label>
+            <Input
+              id="client-seed"
+              placeholder="Extra randomness for this bet"
+              value={clientSeed}
+              onChange={(e) => setClientSeed(e.target.value)}
+              disabled={!canBet}
+              maxLength={256}
+              className="font-mono text-sm"
+            />
+            <p className="text-muted-foreground text-xs">
+              Mixed into the round outcome with other players&apos; seeds after
+              betting closes.
+            </p>
           </div>
           <div className="flex flex-col gap-2">
             <Button

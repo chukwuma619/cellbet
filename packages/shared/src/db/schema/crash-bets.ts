@@ -14,7 +14,7 @@ export const crashBets = pgTable("crash_bets", {
     .notNull()
     .references(() => crashRounds.id, { onDelete: "cascade" }),
   ckbAddress: text("ckb_address").notNull(),
-  /** Stake amount (same unit as API; decimal string in DB). */
+  clientSeed: text("client_seed"),
   amount: numeric("amount", { precision: 20, scale: 8 }).notNull(),
   status: text("status").notNull(),
   cashedOutAtMultiplier: numeric("cashed_out_at_multiplier", {

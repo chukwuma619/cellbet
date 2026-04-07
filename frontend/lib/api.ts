@@ -25,6 +25,8 @@ export async function fetchCrashRoundProof(roundId: string): Promise<unknown> {
 export async function postBet(body: {
   walletAddress: string;
   amount: number;
+  /** Optional user entropy (§4.9); max 256 chars. */
+  clientSeed?: string;
 }): Promise<unknown> {
   const res = await fetch(`${getApiBaseUrl()}/crash/bets`, {
     method: "POST",
