@@ -113,13 +113,17 @@ export class CrashSettlementService {
     const houseHash = hex32ToBytes(houseAddr.script.hash());
 
     if (!buffersEqual(userHash, escrowData.userLockHash)) {
-      throw new Error('userCkbAddress does not match escrow cell user lock hash');
+      throw new Error(
+        'userCkbAddress does not match escrow cell user lock hash',
+      );
     }
     if (!buffersEqual(platformHash, escrowData.platformLockHash)) {
       throw new Error('platform address does not match escrow cell');
     }
     if (!buffersEqual(houseHash, escrowData.houseLockHash)) {
-      throw new Error('house signer does not match escrow cell house lock hash');
+      throw new Error(
+        'house signer does not match escrow cell house lock hash',
+      );
     }
 
     const stake = escrowData.stakeShannons;
@@ -141,7 +145,10 @@ export class CrashSettlementService {
 
     tx.addInput(cellInput);
     tx.addOutput({ lock: userAddr.script, capacity: userShannons }, '0x');
-    tx.addOutput({ lock: platformAddress.script, capacity: platformShannons }, '0x');
+    tx.addOutput(
+      { lock: platformAddress.script, capacity: platformShannons },
+      '0x',
+    );
     tx.addOutput({ lock: houseAddr.script, capacity: MIN_CELL_SHANNONS }, '0x');
 
     await tx.completeInputsByCapacity(signer, FEE_BUFFER_SHANNONS);

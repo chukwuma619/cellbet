@@ -15,10 +15,7 @@ describe('AppController', () => {
   beforeEach(async () => {
     const app: TestingModule = await Test.createTestingModule({
       controllers: [AppController],
-      providers: [
-        AppService,
-        { provide: DRIZZLE, useValue: mockDb },
-      ],
+      providers: [AppService, { provide: DRIZZLE, useValue: mockDb }],
     }).compile();
 
     appController = app.get<AppController>(AppController);

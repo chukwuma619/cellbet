@@ -82,7 +82,7 @@ export class CkbRpcService {
     }
   }
 
-  async getTransaction(txHash: string): Promise<unknown | null> {
+  async getTransaction(txHash: string): Promise<unknown> {
     if (!this.rpcUrl) return null;
     try {
       const h = txHash.startsWith('0x') ? txHash : `0x${txHash}`;
