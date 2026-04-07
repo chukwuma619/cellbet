@@ -1,4 +1,7 @@
+import { sql } from "drizzle-orm";
 import {
+  bigint,
+  integer,
   numeric,
   pgTable,
   text,
@@ -9,6 +12,10 @@ import {
 export const crashRounds = pgTable("crash_rounds", {
   id: uuid("id").defaultRandom().primaryKey(),
   roundKey: text("round_key").notNull().unique(),
+  chainRoundId: bigint("chain_round_id", { mode: "bigint" })
+    .notNull()
+    .unique()
+    .default(sql`nextval('crash_chain_round_id_seq'::regclass)`),
   phase: text("phase").notNull(),
   serverSeedHash: text("server_seed_hash").notNull(),
   serverSeed: text("server_seed"),
@@ -25,4 +32,8 @@ export const crashRounds = pgTable("crash_rounds", {
   runningAt: timestamp("running_at", { withTimezone: true }),
   crashedAt: timestamp("crashed_at", { withTimezone: true }),
   settledAt: timestamp("settled_at", { withTimezone: true }),
+  /** House-anchored commit cell tx (server seed hash commitment). */
+  commitTxHash: text("commit_tx_hash"),
+  commitOutputIndex: integer("commit_output_index").notNull().default(0),
+  commitRevealTxHash: text("commit_reveal_tx_hash"),
 });

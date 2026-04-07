@@ -6,6 +6,7 @@ import {
   type Signer,
 } from "@ckb-ccc/core";
 import {
+  CKB_MIN_OCCUPIED_CAPACITY_SHANNONS,
   encodeCrashCommitCellDataV1,
   encodeCrashEscrowCellDataV2,
   hex32ToBytes,
@@ -24,8 +25,6 @@ import {
   lockHashesForHouseAndPlatform,
 } from "../crash-scripts";
 import { CellbetCkbError, mapCkbException } from "../errors";
-
-const MIN_CELL_SHANNONS = BigInt("6100000000");
 
 function crashCfgOrThrow(message: string): CrashOnChainConfig {
   try {
@@ -140,7 +139,7 @@ export async function buildAnchorRoundTx(params: {
 
   tx.addOutput(
     {
-      capacity: MIN_CELL_SHANNONS,
+      capacity: CKB_MIN_OCCUPIED_CAPACITY_SHANNONS,
       lock: houseAddr.script,
       type: typeScript,
     },

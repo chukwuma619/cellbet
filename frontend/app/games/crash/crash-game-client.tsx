@@ -1,6 +1,8 @@
 "use client";
 
-import { fixedPointFrom } from "@ckb-ccc/core";
+import { CKB_MIN_OCCUPIED_CAPACITY_SHANNONS } from "@cellbet/shared";
+import { fixedPointFrom, fixedPointToString } from "@ckb-ccc/core";
+import { useCcc } from "@ckb-ccc/connector-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -13,10 +15,18 @@ import { useOnChainCkbBalance } from "@/hooks/use-on-chain-ckb-balance";
 import { CrashParticipantsTable } from "@/components/crash/crash-participants-table";
 import { useCrashSocket } from "@/hooks/use-crash-socket";
 import { postBet, postCashOut } from "@/lib/api";
+import { isCrashOnChainConfigured } from "@/lib/ckb/crash-config";
+import { CellbetCkbError, userMessageForCkbError } from "@/lib/ckb/errors";
+import { buildPlaceBetTx } from "@/lib/ckb/tx/game-txs";
+
+const MIN_ONCHAIN_STAKE_CKB = Number(
+  fixedPointToString(CKB_MIN_OCCUPIED_CAPACITY_SHANNONS, 8),
+);
 
 export function CrashGameClient() {
   const { round, participants } = useCrashSocket();
   const { address, isConnected, openConnector } = useCkbAddress();
+  const { signerInfo } = useCcc();
   const { shannons, displayShort, refresh } = useOnChainCkbBalance(address);
   const [now, setNow] = useState(() => Date.now());
   const [amount, setAmount] = useState("10");
@@ -34,14 +44,28 @@ export function CrashGameClient() {
       ? Math.max(0, (round.bettingEndsAt - now) / 1000)
       : 0;
 
+  const ckbGameConfigured = isCrashOnChainConfigured();
+
   async function onBet() {
     if (!address) {
       openConnector();
       return;
     }
+    if (!ckbGameConfigured) {
+      toast.error(
+        "Crash requires NEXT_PUBLIC_CRASH_ROUND_* scripts and house/platform addresses in env.",
+      );
+      return;
+    }
     const n = Number(amount);
     if (!Number.isFinite(n) || n <= 0) {
       toast.error("Enter a valid amount");
+      return;
+    }
+    if (n < MIN_ONCHAIN_STAKE_CKB) {
+      toast.error(
+        `Stake must be at least ${MIN_ONCHAIN_STAKE_CKB} CKB (CKB cell minimum).`,
+      );
       return;
     }
     if (
@@ -53,14 +77,38 @@ export function CrashGameClient() {
     }
     setSubmitting(true);
     try {
+      const signer = signerInfo?.signer;
+      if (!signer) {
+        openConnector();
+        return;
+      }
+      const chainRoundId = round?.chainRoundId?.trim();
+      const seedHash = round?.serverSeedHash?.trim();
+      if (!chainRoundId || !seedHash) {
+        toast.error("Round data not ready — wait for the next betting window.");
+        return;
+      }
+      const stakeShannons = fixedPointFrom(amount.trim() || "0", 8);
+      const escrowTxHash = await buildPlaceBetTx({
+        signer,
+        roundId: BigInt(chainRoundId),
+        stakeShannons,
+        serverSeedHashHex: seedHash,
+      });
       await postBet({
         walletAddress: address,
         amount: n,
+        escrowTxHash,
+        escrowOutputIndex: 0,
       });
       await refresh();
       toast.success("Bet placed");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Bet failed");
+      if (e instanceof CellbetCkbError) {
+        toast.error(userMessageForCkbError(e));
+      } else {
+        toast.error(e instanceof Error ? e.message : "Bet failed");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -83,11 +131,16 @@ export function CrashGameClient() {
   const balanceOk =
     shannons === null ||
     fixedPointFrom(amount.trim() || "0", 8) <= shannons;
+  const chainRoundReady = Boolean(
+    round?.chainRoundId && round.chainRoundId.length > 0,
+  );
   const canBet =
     isConnected &&
+    ckbGameConfigured &&
     phase === "betting" &&
     bettingLeftSec > 0 &&
-    balanceOk;
+    balanceOk &&
+    chainRoundReady;
   const canCashOut =
     isConnected && phase === "running" && mult > 0 && !submitting;
 
@@ -150,6 +203,10 @@ export function CrashGameClient() {
                     </span>
                   )}
                 </div>
+                <p className="text-muted-foreground text-xs">
+                  You sign a CKB transaction that locks your stake in an escrow
+                  cell (min. {MIN_ONCHAIN_STAKE_CKB} CKB).
+                </p>
                 <Input
                   id="stake-a"
                   inputMode="decimal"
@@ -172,7 +229,11 @@ export function CrashGameClient() {
                     : phase === "betting"
                       ? shannons !== null && !balanceOk
                         ? "Insufficient balance"
-                        : "Betting closed"
+                        : !ckbGameConfigured
+                          ? "Configure CKB env"
+                          : !chainRoundReady
+                            ? "Syncing round…"
+                            : "Betting closed"
                       : "Wait"}
                 </Button>
                 <Button
@@ -203,6 +264,10 @@ export function CrashGameClient() {
                     </span>
                   )}
                 </div>
+                <p className="text-muted-foreground text-xs">
+                  You sign a CKB transaction that locks your stake in an escrow
+                  cell (min. {MIN_ONCHAIN_STAKE_CKB} CKB).
+                </p>
                 <Input
                   id="stake-b"
                   inputMode="decimal"
@@ -225,7 +290,11 @@ export function CrashGameClient() {
                     : phase === "betting"
                       ? shannons !== null && !balanceOk
                         ? "Insufficient balance"
-                        : "Betting closed"
+                        : !ckbGameConfigured
+                          ? "Configure CKB env"
+                          : !chainRoundReady
+                            ? "Syncing round…"
+                            : "Betting closed"
                       : "Wait"}
                 </Button>
                 <Button

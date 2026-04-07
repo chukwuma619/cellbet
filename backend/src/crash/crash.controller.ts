@@ -64,6 +64,8 @@ export class CrashController {
         body.walletAddress,
         body.amount,
         body.clientSeed,
+        body.escrowTxHash,
+        body.escrowOutputIndex,
       );
     } catch (e) {
       throw new BadRequestException(

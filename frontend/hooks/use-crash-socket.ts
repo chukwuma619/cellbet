@@ -8,6 +8,7 @@ import { fetchCrashState, getApiBaseUrl } from "@/lib/api";
 export type CrashRoundPublic = {
   id: string;
   roundKey: string;
+  chainRoundId?: string;
   phase: string;
   serverSeedHash: string;
   bettingEndsAt: number;
@@ -113,9 +114,12 @@ function normalizeRound(
       : typeof be === "string"
         ? new Date(be).getTime()
         : Date.now();
+  const chainRaw = raw.chainRoundId;
   return {
     id: String(raw.id),
     roundKey: String(raw.roundKey ?? ""),
+    chainRoundId:
+      chainRaw !== undefined && chainRaw !== null ? String(chainRaw) : undefined,
     phase: String(raw.phase ?? "betting"),
     serverSeedHash: String(raw.serverSeedHash ?? ""),
     bettingEndsAt,
@@ -265,6 +269,8 @@ export function useCrashSocket() {
         const merged: Record<string, unknown> = {
           id: payload.roundId ?? prev?.id ?? "",
           roundKey: payload.roundKey ?? prev?.roundKey ?? "",
+          chainRoundId:
+            payload.chainRoundId ?? prev?.chainRoundId ?? "",
           phase: payload.phase ?? prev?.phase ?? "betting",
           serverSeedHash: payload.serverSeedHash ?? prev?.serverSeedHash ?? "",
           bettingEndsAt:

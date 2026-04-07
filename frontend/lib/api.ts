@@ -39,6 +39,8 @@ export async function postBet(body: {
   walletAddress: string;
   amount: number;
   clientSeed?: string;
+  escrowTxHash: string;
+  escrowOutputIndex?: number;
 }): Promise<unknown> {
   const res = await fetch(`${getApiBaseUrl()}/crash/bets`, {
     method: "POST",

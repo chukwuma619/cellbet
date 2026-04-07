@@ -11,8 +11,9 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import {
+  CKB_MIN_OCCUPIED_CAPACITY_SHANNONS,
   crashCashoutAmounts,
   DEFAULT_CRASH_CASHOUT_FEE_BPS,
 } from '@cellbet/shared';
@@ -24,6 +25,7 @@ import {
 } from '@cellbet/shared/db';
 import type { CrashPhase } from '@cellbet/shared/types';
 
+import { CrashOnchainService } from '../ckb/crash-onchain.service';
 import { CkbRpcService } from '../ckb/ckb-rpc.service';
 import { DRIZZLE } from '../database/database.tokens';
 import { CrashGateway } from './crash.gateway';
@@ -63,6 +65,8 @@ export type CrashParticipantPublic = {
 
 interface RuntimeRound {
   dbRoundId: string;
+  /** On-chain `crash-round` script round id (u64). */
+  chainRoundId: bigint;
   roundKey: string;
   phase: CrashPhase;
   serverSeed: string;
@@ -73,6 +77,20 @@ interface RuntimeRound {
   bettingEndsAt: number;
   runningStartedAt: number | null;
   currentMultiplier: number;
+}
+
+/** Matches Drizzle `select` in `getRecentBetsForWallet` (numeric columns are strings). */
+interface RecentBetForWalletRow {
+  betId: string;
+  roundId: string;
+  amount: string;
+  status: string;
+  cashedOutAtMultiplier: string | null;
+  profit: string | null;
+  createdAt: Date;
+  roundKey: string;
+  roundPhase: string;
+  crashMultiplier: string | null;
 }
 
 @Injectable()
@@ -88,6 +106,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     private readonly gateway: CrashGateway,
     private readonly config: ConfigService,
     private readonly ckbRpc: CkbRpcService,
+    private readonly onchain: CrashOnchainService,
   ) {}
 
   onModuleInit() {
@@ -131,6 +150,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       round: {
         id: r.dbRoundId,
         roundKey: r.roundKey,
+        chainRoundId: r.chainRoundId.toString(),
         phase: r.phase,
         serverSeedHash: r.serverSeedHash,
         bettingEndsAt: r.bettingEndsAt,
@@ -152,6 +172,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     round: {
       id: string;
       roundKey: string;
+      chainRoundId: string;
       phase: string;
       serverSeedHash: string;
       bettingEndsAt: number;
@@ -293,7 +314,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
 
   async getRecentBetsForWallet(walletAddress: string, limit: number) {
     const cap = Math.min(200, Math.max(1, Math.floor(limit)));
-    const rows = await this.db
+    const rows = (await this.db
       .select({
         betId: crashBets.id,
         roundId: crashBets.roundId,
@@ -310,7 +331,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       .innerJoin(crashRounds, eq(crashBets.roundId, crashRounds.id))
       .where(eq(crashBets.ckbAddress, walletAddress))
       .orderBy(desc(crashBets.createdAt))
-      .limit(cap);
+      .limit(cap)) as RecentBetForWalletRow[];
 
     return {
       bets: rows.map((row) => ({
@@ -318,13 +339,10 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
         roundId: row.roundId,
         roundKey: row.roundKey,
         roundPhase: row.roundPhase,
-        amount: row.amount != null ? String(row.amount) : '0',
+        amount: row.amount === '' ? '0' : row.amount,
         status: row.status,
-        cashedOutAtMultiplier:
-          row.cashedOutAtMultiplier != null
-            ? String(row.cashedOutAtMultiplier)
-            : null,
-        profit: row.profit != null ? String(row.profit) : null,
+        cashedOutAtMultiplier: row.cashedOutAtMultiplier,
+        profit: row.profit,
         crashMultiplier:
           row.crashMultiplier != null ? Number(row.crashMultiplier) : null,
         createdAt: row.createdAt.toISOString(),
@@ -362,52 +380,53 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     return { ckbBalance: fixedPointToString(shannons, 8) };
   }
 
-  async placeBet(walletAddress: string, amount: number, clientSeed?: string) {
+  async placeBet(
+    walletAddress: string,
+    amount: number,
+    clientSeed?: string,
+    escrowTxHash?: string,
+    escrowOutputIndex?: number,
+  ) {
     const r = this.runtime;
     if (!r || r.phase !== 'betting' || Date.now() >= r.bettingEndsAt) {
       throw new Error('Betting is closed for this round');
     }
-    const minBet = this.config.get<number>('CRASH_MIN_BET', DEFAULT_MIN_BET);
+
+    const minCellCkb = Number(
+      fixedPointToString(CKB_MIN_OCCUPIED_CAPACITY_SHANNONS, 8),
+    );
+    const cfgMinBet = this.config.get<number>('CRASH_MIN_BET', DEFAULT_MIN_BET);
+    const minBet = Math.max(cfgMinBet, minCellCkb);
     const maxBet = this.config.get<number>('CRASH_MAX_BET', DEFAULT_MAX_BET);
     if (amount < minBet || amount > maxBet) {
       throw new Error(`Amount must be between ${minBet} and ${maxBet}`);
     }
+
     const trimmed = (clientSeed?.trim() ?? '').slice(0, 256);
     const seed = trimmed.length > 0 ? trimmed : null;
-
     const amountStr = String(amount);
-
-    const pendingRows = await this.db
-      .select({
-        sum: sql<string>`coalesce(sum(${crashBets.amount}::numeric), 0)::text`,
-      })
-      .from(crashBets)
-      .where(
-        and(
-          eq(crashBets.roundId, r.dbRoundId),
-          eq(crashBets.ckbAddress, walletAddress),
-          eq(crashBets.status, 'pending'),
-        ),
-      );
-    const pendingStr = pendingRows[0]?.sum ?? '0';
-
-    let onChain: bigint;
-    try {
-      onChain = await this.ckbRpc.getLiveCkbBalanceShannons(walletAddress);
-    } catch (e) {
-      this.logger.warn(`On-chain balance fetch failed: ${String(e)}`);
-      throw new Error(
-        'Could not verify on-chain CKB balance. Set CKB_RPC_URL and CKB_NETWORK to match your app.',
-      );
-    }
-
-    const pendingShannons = fixedPointFrom(pendingStr, 8);
     const newShannons = fixedPointFrom(amountStr, 8);
-    if (onChain < pendingShannons + newShannons) {
+    const feeBps = this.cashoutFeeBps();
+
+    const h = escrowTxHash?.trim();
+    if (!h) {
       throw new Error(
-        'Insufficient on-chain CKB: your wallet must cover this stake plus any other open bets in this round',
+        'Sign and broadcast the place-bet CKB transaction, then submit escrowTxHash with your bet.',
       );
     }
+    const outIdx =
+      escrowOutputIndex !== undefined && escrowOutputIndex !== null
+        ? Math.floor(escrowOutputIndex)
+        : 0;
+    await this.onchain.verifyUserEscrowCell({
+      escrowTxHash: h,
+      escrowOutputIndex: outIdx,
+      userCkbAddress: walletAddress,
+      chainRoundId: r.chainRoundId,
+      serverSeedHashHex: r.serverSeedHash,
+      stakeShannons: newShannons,
+      feeBps,
+    });
 
     await this.db
       .insert(walletAccounts)
@@ -425,6 +444,8 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
         clientSeed: seed,
         amount: amountStr,
         status: 'pending',
+        escrowTxHash: h,
+        escrowOutputIndex: outIdx,
       })
       .returning();
 
@@ -458,41 +479,74 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     const multStr = String(mult);
     const feeBps = this.cashoutFeeBps();
 
-    const execResult = await this.db.execute(sql`
-      UPDATE crash_bets AS c
-      SET
-        status = 'cashed_out',
-        cashed_out_at_multiplier = ${multStr}::numeric,
-        profit = (
-          p.stake
-          * (
-            ${multStr}::numeric * (10000::numeric - ${feeBps}::numeric) / 10000::numeric
-            - 1::numeric
-          )
-        )::numeric
-      FROM (
-        SELECT id, amount::numeric AS stake
-        FROM crash_bets
-        WHERE round_id = ${r.dbRoundId}::uuid
-          AND ckb_address = ${walletAddress}
-          AND status = 'pending'
-        ORDER BY created_at ASC
-        LIMIT 1
-        FOR UPDATE SKIP LOCKED
-      ) AS p
-      WHERE c.id = p.id
-      RETURNING c.id, c.amount, p.stake
-    `);
+    const [candidate] = await this.db
+      .select({
+        id: crashBets.id,
+        amount: crashBets.amount,
+        escrowTxHash: crashBets.escrowTxHash,
+        escrowOutputIndex: crashBets.escrowOutputIndex,
+      })
+      .from(crashBets)
+      .where(
+        and(
+          eq(crashBets.roundId, r.dbRoundId),
+          eq(crashBets.ckbAddress, walletAddress),
+          eq(crashBets.status, 'pending'),
+        ),
+      )
+      .orderBy(asc(crashBets.createdAt))
+      .limit(1);
 
-    const rows = this.rowsFromExecute(execResult);
-    const row = rows[0];
-    if (!row || row.id == null) {
+    if (!candidate) {
       throw new Error('No open bet for this round');
     }
+    if (!candidate.escrowTxHash?.trim()) {
+      throw new Error(
+        'This bet has no on-chain escrow — only CKB escrow bets are supported.',
+      );
+    }
 
-    const betId = this.dbCellToString(row.id, null);
-    const amountStr = this.dbCellToString(row.amount, '0');
-    const stake = Number(row.stake ?? row.amount);
+    const txH = candidate.escrowTxHash.startsWith('0x')
+      ? candidate.escrowTxHash
+      : `0x${candidate.escrowTxHash}`;
+    const settlementTxHash = await this.onchain.settleWinOnChain({
+      escrow: {
+        txHash: txH as `0x${string}`,
+        outputIndex: candidate.escrowOutputIndex ?? 0,
+      },
+      userCkbAddress: walletAddress,
+      multiplier: mult,
+    });
+
+    const stake = Number(candidate.amount);
+    const profit =
+      Number.isFinite(stake) && Number.isFinite(mult)
+        ? stake *
+          ((mult * (10000 - feeBps)) / 10000 - 1)
+        : 0;
+
+    const [updatedBet] = await this.db
+      .update(crashBets)
+      .set({
+        status: 'cashed_out',
+        cashedOutAtMultiplier: multStr,
+        profit: String(profit),
+        settlementTxHash,
+      })
+      .where(
+        and(eq(crashBets.id, candidate.id), eq(crashBets.status, 'pending')),
+      )
+      .returning();
+
+    if (!updatedBet) {
+      throw new Error(
+        'Bet state changed after on-chain settlement — contact support if funds look wrong.',
+      );
+    }
+
+    const betId = String(updatedBet.id);
+    const amountStr =
+      updatedBet.amount != null ? String(updatedBet.amount) : '0';
     const amounts =
       Number.isFinite(stake) && Number.isFinite(mult)
         ? crashCashoutAmounts(stake, mult, feeBps)
@@ -519,7 +573,72 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       grossWinAmount: amounts?.grossPayout,
       platformFee: amounts?.platformFee,
       netPayout: amounts?.netPayout,
+      settlementTxHash,
     };
+  }
+
+  private async anchorCommitForRound(
+    dbRoundId: string,
+    chainRoundId: bigint,
+    serverSeedUtf8: string,
+  ) {
+    try {
+      const ref = await this.onchain.anchorCommitForRound({
+        chainRoundId,
+        serverSeedUtf8,
+      });
+      await this.db
+        .update(crashRounds)
+        .set({
+          commitTxHash: ref.txHash,
+          commitOutputIndex: ref.outputIndex,
+        })
+        .where(eq(crashRounds.id, dbRoundId));
+    } catch (e) {
+      this.logger.error(
+        `Anchor commit cell failed for round ${dbRoundId}`,
+        e instanceof Error ? e.stack : e,
+      );
+    }
+  }
+
+  private async maybeRevealCommitForRound(
+    dbRoundId: string,
+    chainRoundId: bigint,
+    serverSeedUtf8: string,
+  ) {
+    const [round] = await this.db
+      .select({
+        commitTxHash: crashRounds.commitTxHash,
+        commitOutputIndex: crashRounds.commitOutputIndex,
+        commitRevealTxHash: crashRounds.commitRevealTxHash,
+      })
+      .from(crashRounds)
+      .where(eq(crashRounds.id, dbRoundId))
+      .limit(1);
+    if (!round?.commitTxHash || round.commitRevealTxHash) return;
+    try {
+      const txH = round.commitTxHash.startsWith('0x')
+        ? round.commitTxHash
+        : `0x${round.commitTxHash}`;
+      const revealTx = await this.onchain.revealCommitForRound({
+        commit: {
+          txHash: txH as `0x${string}`,
+          outputIndex: round.commitOutputIndex ?? 0,
+        },
+        chainRoundId,
+        serverSeedUtf8,
+      });
+      await this.db
+        .update(crashRounds)
+        .set({ commitRevealTxHash: revealTx })
+        .where(eq(crashRounds.id, dbRoundId));
+    } catch (e) {
+      this.logger.error(
+        `Commit reveal failed for round ${dbRoundId}`,
+        e instanceof Error ? e.stack : e,
+      );
+    }
   }
 
   private clearTick() {
@@ -557,8 +676,15 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       })
       .returning();
 
+    if (row.chainRoundId == null) {
+      throw new Error(
+        'crash_rounds.chain_round_id is missing — apply migration 0008_crash_onchain.sql',
+      );
+    }
+
     this.runtime = {
       dbRoundId: row.id,
+      chainRoundId: row.chainRoundId,
       roundKey,
       phase: 'betting',
       serverSeed,
@@ -575,9 +701,12 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       phase: 'betting',
       roundId: row.id,
       roundKey,
+      chainRoundId: row.chainRoundId.toString(),
       serverSeedHash,
       bettingEndsAt,
     });
+
+    void this.anchorCommitForRound(row.id, row.chainRoundId, serverSeed);
 
     void this.pushPublicState();
 
@@ -625,6 +754,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       phase: 'locked',
       roundId: r.dbRoundId,
       roundKey: r.roundKey,
+      chainRoundId: r.chainRoundId.toString(),
     });
     const lockMs = this.config.get<number>('CRASH_LOCK_MS', DEFAULT_LOCK_MS);
     this.schedulePhase(() => this.goRunning(), lockMs);
@@ -646,6 +776,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       phase: 'running',
       roundId: r.dbRoundId,
       roundKey: r.roundKey,
+      chainRoundId: r.chainRoundId.toString(),
       startedAt: now,
     });
 
@@ -711,11 +842,34 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       );
     for (const bet of pending) {
       const stake = Number(bet.amount);
+      let forfeitTx: string | undefined;
+      if (bet.escrowTxHash?.trim()) {
+        try {
+          const txH = bet.escrowTxHash.startsWith('0x')
+            ? bet.escrowTxHash
+            : `0x${bet.escrowTxHash}`;
+          forfeitTx = await this.onchain.settleForfeitOnChain({
+            escrow: {
+              txHash: txH as `0x${string}`,
+              outputIndex: bet.escrowOutputIndex ?? 0,
+            },
+          });
+        } catch (e) {
+          this.logger.error(
+            `On-chain forfeit failed for bet ${bet.id}: ${String(e)}`,
+          );
+        }
+      } else {
+        this.logger.warn(
+          `Pending bet ${bet.id} has no escrow_tx_hash; marking lost without on-chain forfeit`,
+        );
+      }
       await this.db
         .update(crashBets)
         .set({
           status: 'lost',
           profit: String(-stake),
+          settlementTxHash: forfeitTx ?? null,
         })
         .where(eq(crashBets.id, bet.id));
     }
@@ -743,6 +897,12 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       serverSeed: r.serverSeed,
       combinedClientSeed: r.combinedClientSeed,
     });
+
+    void this.maybeRevealCommitForRound(
+      r.dbRoundId,
+      r.chainRoundId,
+      r.serverSeed,
+    );
 
     this.schedulePhase(() => {
       void this.startNewRound().catch((err) =>

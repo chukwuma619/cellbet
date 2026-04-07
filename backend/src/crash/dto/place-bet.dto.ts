@@ -1,5 +1,7 @@
 import { Type } from 'class-transformer';
 import {
+  IsInt,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
@@ -22,4 +24,15 @@ export class PlaceBetDto {
   @IsString()
   @MaxLength(256)
   clientSeed?: string;
+
+  /** Transaction hash from `buildPlaceBetTx` (escrow output). */
+  @IsString()
+  @IsNotEmpty()
+  escrowTxHash!: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  escrowOutputIndex?: number;
 }

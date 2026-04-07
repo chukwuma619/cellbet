@@ -57,6 +57,20 @@
       "when": 1775567341380,
       "tag": "0007_dapper_dormammu",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1776000000000,
+      "tag": "0008_crash_onchain",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1775596046938,
+      "tag": "0009_youthful_shiva",
+      "breakpoints": true
     }
   ]
 }

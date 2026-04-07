@@ -1,4 +1,5 @@
 import {
+  integer,
   numeric,
   pgTable,
   text,
@@ -23,6 +24,11 @@ export const crashBets = pgTable("crash_bets", {
   }),
   /** Payout minus stake; negative or zero on loss. */
   profit: numeric("profit", { precision: 20, scale: 8 }),
+  /** On-chain escrow cell out point (place-bet tx). */
+  escrowTxHash: text("escrow_tx_hash"),
+  escrowOutputIndex: integer("escrow_output_index").notNull().default(0),
+  /** Win / forfeit settlement tx hash when settled on-chain. */
+  settlementTxHash: text("settlement_tx_hash"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
