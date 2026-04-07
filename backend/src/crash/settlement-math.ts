@@ -1,11 +1,11 @@
-import { DEFAULT_CRASH_CASHOUT_FEE_BPS } from "./cashout-fee";
+import { DEFAULT_CRASH_CASHOUT_FEE_BPS } from './cashout-fee';
 
 export function grossCashoutShannons(
   stakeShannons: bigint,
   multiplier: number,
 ): bigint {
   if (!Number.isFinite(multiplier) || multiplier < 0) {
-    throw new Error("multiplier must be a non-negative finite number");
+    throw new Error('multiplier must be a non-negative finite number');
   }
   const m = Math.floor(multiplier * 1e8);
   return (stakeShannons * BigInt(m)) / 100_000_000n;

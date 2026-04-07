@@ -1,10 +1,4 @@
-import {
-  numeric,
-  pgTable,
-  text,
-  timestamp,
-  uuid,
-} from 'drizzle-orm/pg-core';
+import { numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 /** Cached wallet identity for leaderboards, preferences, and off-chain UX. */
 export const walletAccounts = pgTable('wallet_accounts', {

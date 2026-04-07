@@ -350,31 +350,6 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private rowsFromExecute(res: unknown): Record<string, unknown>[] {
-    if (Array.isArray(res)) return res as Record<string, unknown>[];
-    if (
-      res &&
-      typeof res === 'object' &&
-      'rows' in res &&
-      Array.isArray((res as { rows: unknown }).rows)
-    ) {
-      return (res as { rows: Record<string, unknown>[] }).rows;
-    }
-    return [];
-  }
-
-  /** Avoid String(unknown): raw SQL rows are Record<string, unknown>. */
-  private dbCellToString(value: unknown, ifNull: string | null): string {
-    if (value == null) {
-      if (ifNull === null) throw new Error('Expected non-null database cell');
-      return ifNull;
-    }
-    if (typeof value === 'string') return value;
-    if (typeof value === 'number' || typeof value === 'bigint')
-      return String(value);
-    throw new Error('Unexpected database cell type');
-  }
-
   async getCkbBalance(walletAddress: string): Promise<{ ckbBalance: string }> {
     const shannons = await this.ckbRpc.getLiveCkbBalanceShannons(walletAddress);
     return { ckbBalance: fixedPointToString(shannons, 8) };
@@ -521,8 +496,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     const stake = Number(candidate.amount);
     const profit =
       Number.isFinite(stake) && Number.isFinite(mult)
-        ? stake *
-          ((mult * (10000 - feeBps)) / 10000 - 1)
+        ? stake * ((mult * (10000 - feeBps)) / 10000 - 1)
         : 0;
 
     const [updatedBet] = await this.db

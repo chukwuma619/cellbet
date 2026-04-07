@@ -3,7 +3,7 @@ export function encodeRoundAnchorCellData(
   commitmentSha256Raw: Uint8Array,
 ): Uint8Array {
   if (commitmentSha256Raw.length !== 32) {
-    throw new Error("commitmentSha256Raw must be 32 bytes");
+    throw new Error('commitmentSha256Raw must be 32 bytes');
   }
   const out = new Uint8Array(40);
   const view = new DataView(out.buffer);
@@ -18,7 +18,7 @@ export function encodeSettlementCellDataV1(
   houseLockHash: Uint8Array,
 ): Uint8Array {
   if (userLockHash.length !== 32 || houseLockHash.length !== 32) {
-    throw new Error("lock hashes must be 32 bytes (script hash)");
+    throw new Error('lock hashes must be 32 bytes (script hash)');
   }
   const out = new Uint8Array(80);
   const view = new DataView(out.buffer);
@@ -47,10 +47,19 @@ export function encodeSettlementWitnessV1(params: {
   userOutputIndex: number;
   houseOutputIndex: number;
 }): Uint8Array {
-  const { userPayoutShannons, housePayoutShannons, userOutputIndex, houseOutputIndex } =
-    params;
-  if (userOutputIndex < 0 || userOutputIndex > 255 || houseOutputIndex < 0 || houseOutputIndex > 255) {
-    throw new Error("output indices must be u8");
+  const {
+    userPayoutShannons,
+    housePayoutShannons,
+    userOutputIndex,
+    houseOutputIndex,
+  } = params;
+  if (
+    userOutputIndex < 0 ||
+    userOutputIndex > 255 ||
+    houseOutputIndex < 0 ||
+    houseOutputIndex > 255
+  ) {
+    throw new Error('output indices must be u8');
   }
   const out = new Uint8Array(18);
   const view = new DataView(out.buffer);
@@ -62,9 +71,11 @@ export function encodeSettlementWitnessV1(params: {
 }
 
 /** Loss / forfeit: full stake to house, no platform fee (2-byte witness). */
-export function encodeCrashForfeitWitnessV1(houseOutputIndex: number): Uint8Array {
+export function encodeCrashForfeitWitnessV1(
+  houseOutputIndex: number,
+): Uint8Array {
   if (houseOutputIndex < 0 || houseOutputIndex > 255) {
-    throw new Error("houseOutputIndex must be u8");
+    throw new Error('houseOutputIndex must be u8');
   }
   return new Uint8Array([0, houseOutputIndex & 0xff]);
 }
@@ -81,10 +92,10 @@ export function decodeCrashEscrowCellDataV2(data: Uint8Array): {
   feeBps: number;
 } {
   if (data.length !== 148) {
-    throw new Error("escrow v2 cell data must be 148 bytes");
+    throw new Error('escrow v2 cell data must be 148 bytes');
   }
   if (data[0] !== 1 || data[1] !== 1) {
-    throw new Error("unexpected escrow version/state");
+    throw new Error('unexpected escrow version/state');
   }
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const roundId = view.getBigUint64(2, true);
@@ -124,7 +135,7 @@ export function encodeCrashWinWitnessV2(params: {
     houseOutputIndex,
   } = params;
   for (const idx of [userOutputIndex, platformOutputIndex, houseOutputIndex]) {
-    if (idx < 0 || idx > 255) throw new Error("output indices must be u8");
+    if (idx < 0 || idx > 255) throw new Error('output indices must be u8');
   }
   const out = new Uint8Array(28);
   const view = new DataView(out.buffer);

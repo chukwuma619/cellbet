@@ -1,4 +1,4 @@
-import { sha256 } from "js-sha256";
+import { sha256 } from 'js-sha256';
 
 export function sha256HexUtf8(data: string): string {
   return sha256(data);
@@ -13,17 +13,16 @@ function sha256ConcatUtf8(parts: string[]): Uint8Array {
 }
 
 export function combineClientSeedsOrdered(parts: string[]): string {
-  return parts.map((p) => p.trim()).join("\x1e");
+  return parts.map((p) => p.trim()).join('\x1e');
 }
 
 export function computeCrashMultiplier(
   serverSeed: string,
   roundKey: string,
-  clientSeed = "",
+  clientSeed = '',
 ): number {
   const h = sha256ConcatUtf8([serverSeed, roundKey, clientSeed]);
-  const u =
-    ((h[0]! << 24) | (h[1]! << 16) | (h[2]! << 8) | h[3]!) / 2 ** 32;
+  const u = ((h[0] << 24) | (h[1] << 16) | (h[2] << 8) | h[3]) / 2 ** 32;
   const safeU = Math.max(1e-9, Math.min(1 - 1e-9, u));
   const houseEdge = 0.01;
   const e = 1 - houseEdge;
@@ -35,11 +34,10 @@ export function computeCrashMultiplier(
 export function computeRunningDurationMs(
   serverSeed: string,
   roundKey: string,
-  clientSeed = "",
+  clientSeed = '',
 ): number {
-  const h = sha256ConcatUtf8([serverSeed, roundKey, clientSeed, "duration"]);
-  const u32 =
-    ((h[0]! << 24) | (h[1]! << 16) | (h[2]! << 8) | h[3]!) >>> 0;
+  const h = sha256ConcatUtf8([serverSeed, roundKey, clientSeed, 'duration']);
+  const u32 = ((h[0] << 24) | (h[1] << 16) | (h[2] << 8) | h[3]) >>> 0;
   return 5000 + (u32 % 15001);
 }
 
@@ -68,7 +66,7 @@ export function verifyCrashRound(input: {
   crashMultiplier: number;
   clientSeed?: string;
 }): CrashVerifyResult {
-  const clientSeed = input.clientSeed ?? "";
+  const clientSeed = input.clientSeed ?? '';
   const expectedHash = sha256HexUtf8(input.serverSeed);
   const commitmentValid =
     expectedHash.toLowerCase() === input.serverSeedHash.trim().toLowerCase();
