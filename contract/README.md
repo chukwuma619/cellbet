@@ -30,8 +30,5 @@ This builds both script binaries, then runs `cargo test` (mock CKB VM).
 
 Use the **SHA-256** script when anchoring commitments that must verify against the same strings as Postgres + the proof endpoint.
 
-## Next (not in this folder yet)
-
-Escrow locks, payout paths, devnet tx building, and indexer sync are described in [`docs/BETTING_PLATFORM_NERVOS_CKB.md`](../docs/BETTING_PLATFORM_NERVOS_CKB.md) §9.
 
 Bootstrapped from [ckb-script-templates](https://github.com/cryptape/ckb-script-templates).

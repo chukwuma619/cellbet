@@ -1,4 +1,4 @@
-//! Type script aligned with off-chain Crash **§4.9**: `server_seed_hash` is **SHA-256** (raw 32 bytes
+//! Type script aligned with the off-chain Crash commitment scheme: `server_seed_hash` is **SHA-256** (raw 32 bytes
 //! in cell data) of the **UTF-8** `server_seed` string (same as `sha256HexUtf8` in `@cellbet/shared`).
 //!
 //! - **Mint:** group output cell data must be exactly **32 bytes** (the commitment).

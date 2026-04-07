@@ -114,7 +114,7 @@ export function CrashHistoryPanel({ walletAddress, refreshKey }: Props) {
         <div>
           <CardTitle className="text-base">History</CardTitle>
           <CardDescription>
-            Recent settled rounds and your bets (off-chain records).
+            Recent settled rounds and your bets for this wallet.
           </CardDescription>
         </div>
         <Button
@@ -130,7 +130,7 @@ export function CrashHistoryPanel({ walletAddress, refreshKey }: Props) {
       <CardContent>
         {walletAddress && bets.length > 0 && (
           <p className="text-muted-foreground mb-4 text-sm">
-            Net on listed bets (demo units):{" "}
+            Net on listed bets (CKB):{" "}
             <span
               className={
                 recentNet >= 0 ? "text-foreground font-medium" : "text-destructive font-medium"

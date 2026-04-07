@@ -18,8 +18,8 @@ export default function HomePage() {
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Games</h1>
           <p className="text-muted-foreground mt-1 text-sm">
-            Provably fair crash on Nervos CKB — demo rounds run off-chain until
-            contracts ship.
+            Provably fair crash on Nervos CKB — live rounds with verifiable
+            outcomes after each settlement.
           </p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
