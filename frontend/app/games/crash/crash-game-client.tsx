@@ -1,5 +1,6 @@
 "use client";
 
+import { fixedPointFrom } from "@ckb-ccc/core";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -8,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCkbAddress } from "@/hooks/use-ckb-address";
+import { useOnChainCkbBalance } from "@/hooks/use-on-chain-ckb-balance";
 import { CrashParticipantsTable } from "@/components/crash/crash-participants-table";
 import { useCrashSocket } from "@/hooks/use-crash-socket";
 import { postBet, postCashOut } from "@/lib/api";
@@ -15,19 +17,15 @@ import { postBet, postCashOut } from "@/lib/api";
 export function CrashGameClient() {
   const { round, participants } = useCrashSocket();
   const { address, isConnected, openConnector } = useCkbAddress();
+  const { shannons, displayShort, refresh } = useOnChainCkbBalance(address);
   const [now, setNow] = useState(() => Date.now());
   const [amount, setAmount] = useState("10");
-  const [hasOpenBet, setHasOpenBet] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 200);
     return () => clearInterval(t);
   }, []);
-
-  useEffect(() => {
-    setHasOpenBet(false);
-  }, [round?.id]);
 
   const phase = round?.phase ?? "…";
   const mult = round?.currentMultiplier ?? 1;
@@ -46,13 +44,20 @@ export function CrashGameClient() {
       toast.error("Enter a valid amount");
       return;
     }
+    if (
+      shannons !== null &&
+      fixedPointFrom(amount.trim() || "0", 8) > shannons
+    ) {
+      toast.error("Insufficient on-chain CKB balance");
+      return;
+    }
     setSubmitting(true);
     try {
       await postBet({
         walletAddress: address,
         amount: n,
       });
-      setHasOpenBet(true);
+      await refresh();
       toast.success("Bet placed");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Bet failed");
@@ -66,7 +71,7 @@ export function CrashGameClient() {
     setSubmitting(true);
     try {
       await postCashOut(address);
-      setHasOpenBet(false);
+      await refresh();
       toast.success("Cashed out");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Cash out failed");
@@ -75,9 +80,16 @@ export function CrashGameClient() {
     }
   }
 
-  const canBet = isConnected && phase === "betting" && bettingLeftSec > 0;
+  const balanceOk =
+    shannons === null ||
+    fixedPointFrom(amount.trim() || "0", 8) <= shannons;
+  const canBet =
+    isConnected &&
+    phase === "betting" &&
+    bettingLeftSec > 0 &&
+    balanceOk;
   const canCashOut =
-    isConnected && phase === "running" && hasOpenBet && mult > 0 && !submitting;
+    isConnected && phase === "running" && mult > 0 && !submitting;
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
@@ -130,13 +142,22 @@ export function CrashGameClient() {
                 </p>
               )}
               <div className="space-y-2">
-                <Label htmlFor="stake">Stake (CKB)</Label>
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="stake-a">Stake (CKB)</Label>
+                  {displayShort !== null && (
+                    <span className="text-muted-foreground font-mono text-xs tabular-nums">
+                      {displayShort}
+                    </span>
+                  )}
+                </div>
                 <Input
-                  id="stake"
+                  id="stake-a"
                   inputMode="decimal"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  disabled={!canBet}
+                  disabled={
+                    !isConnected || phase !== "betting" || bettingLeftSec <= 0
+                  }
                 />
               </div>
 
@@ -149,7 +170,9 @@ export function CrashGameClient() {
                   {canBet
                     ? "Bet"
                     : phase === "betting"
-                      ? "Betting closed"
+                      ? shannons !== null && !balanceOk
+                        ? "Insufficient balance"
+                        : "Betting closed"
                       : "Wait"}
                 </Button>
                 <Button
@@ -172,13 +195,22 @@ export function CrashGameClient() {
                 </p>
               )}
               <div className="space-y-2">
-                <Label htmlFor="stake">Stake (CKB)</Label>
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="stake-b">Stake (CKB)</Label>
+                  {displayShort !== null && (
+                    <span className="text-muted-foreground font-mono text-xs tabular-nums">
+                      {displayShort}
+                    </span>
+                  )}
+                </div>
                 <Input
-                  id="stake"
+                  id="stake-b"
                   inputMode="decimal"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  disabled={!canBet}
+                  disabled={
+                    !isConnected || phase !== "betting" || bettingLeftSec <= 0
+                  }
                 />
               </div>
 
@@ -191,7 +223,9 @@ export function CrashGameClient() {
                   {canBet
                     ? "Bet"
                     : phase === "betting"
-                      ? "Betting closed"
+                      ? shannons !== null && !balanceOk
+                        ? "Insufficient balance"
+                        : "Betting closed"
                       : "Wait"}
                 </Button>
                 <Button
@@ -206,6 +240,10 @@ export function CrashGameClient() {
             </CardContent>
           </Card>
         </div>
+        <p className="text-muted-foreground text-center text-xs">
+          On settlement, a 3% platform fee is taken from the gross cash-out (stake × multiplier)
+          before you receive winnings; losses send the full stake to the house with no fee.
+        </p>
       </div>
 
       <div className="col-span-1 order-2 md:order-1">

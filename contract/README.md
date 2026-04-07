@@ -7,7 +7,7 @@ Rust [`ckb-std`](https://github.com/nervosnetwork/ckb-std) type scripts built fo
 From this directory:
 
 ```bash
-npm run build:scripts   # both RISC-V binaries → build/release/
+npm run build:scripts   # RISC-V binary → build/release/
 npm run build          # scripts + `cargo build --release` (workspace)
 ```
 
@@ -19,16 +19,14 @@ Requires `riscv64imac-unknown-none-elf` (`rustup target add …`) and Clang/LLVM
 npm test
 ```
 
-This builds both script binaries, then runs `cargo test` (mock CKB VM).
+This builds the script binary, then runs `cargo test` (mock CKB VM).
 
-## Scripts
+## Script
 
 | Crate | Role |
 |--------|------|
-| [`contracts/crash-commit-reveal`](./contracts/crash-commit-reveal) | Early prototype: **BLAKE2b-256** of a **32-byte** preimage; witness must be exactly 32 bytes. Does **not** match the off-chain `server_seed_hash` format. |
-| [`contracts/crash-seed-commit-sha256`](./contracts/crash-seed-commit-sha256) | **SHA-256** over UTF-8 `server_seed` (variable length ≤ 256 bytes). Cell data = 32-byte hash; spend proves knowledge of seed. Matches [`sha256HexUtf8`](../../packages/shared/src/provably-fair/crash.ts) / Crash proof API. |
+| [`contracts/crash-round`](./contracts/crash-round) | **Unified** crash type script: **commit** cell (42 B) for `round_id` + SHA-256(UTF-8 seed); **escrow** cell (148 B) with user / house / **platform** lock hashes, stake, and **fee_bps** (e.g. 300 = 3%). **Loss:** 2-byte forfeit witness → full capacity to house, **no** fee. **Win:** 28-byte witness → 3 outputs; **platform** receives `floor((user+platform) * fee_bps / 10000)` from gross cash-out, **user** gets the remainder of that gross, **house** gets the rest of the cell capacity. |
 
-Use the **SHA-256** script when anchoring commitments that must verify against the same strings as Postgres + the proof endpoint.
-
+TypeScript encoders live in `@cellbet/shared` (`encodeCrashEscrowCellDataV2`, `encodeCrashWinWitnessV2`, `encodeCrashForfeitWitnessV1`, etc.).
 
 Bootstrapped from [ckb-script-templates](https://github.com/cryptape/ckb-script-templates).

@@ -1,15 +1,46 @@
+import {
+  Address,
+  ClientPublicMainnet,
+  ClientPublicTestnet,
+  type Client,
+} from '@ckb-ccc/core';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class CkbRpcService {
   private readonly log = new Logger(CkbRpcService.name);
+  private cccClient: Client | null = null;
 
   constructor(private readonly config: ConfigService) {}
 
   get rpcUrl(): string | undefined {
     const u = this.config.get<string>('CKB_RPC_URL')?.trim();
     return u || undefined;
+  }
+
+  /**
+   * Shared CKB CCC client (testnet/mainnet). Uses CKB_RPC_URL when set; otherwise public endpoints.
+   */
+  getCccClient(): Client {
+    if (this.cccClient) return this.cccClient;
+    const url = this.rpcUrl;
+    const network = (
+      this.config.get<string>('CKB_NETWORK') ?? 'testnet'
+    ).toLowerCase();
+    if (network === 'mainnet') {
+      this.cccClient = new ClientPublicMainnet(url ? { url } : undefined);
+    } else {
+      this.cccClient = new ClientPublicTestnet(url ? { url } : undefined);
+    }
+    return this.cccClient;
+  }
+
+  /** Live layer-1 CKB balance for the address lock (shannons). */
+  async getLiveCkbBalanceShannons(address: string): Promise<bigint> {
+    const client = this.getCccClient();
+    const parsed = await Address.fromString(address, client);
+    return client.getBalanceSingle(parsed.script);
   }
 
   private async rpc<T>(method: string, params: unknown[] = []): Promise<T> {

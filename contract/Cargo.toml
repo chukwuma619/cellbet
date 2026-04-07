@@ -10,10 +10,7 @@ members = [
 
 # Standalone no_std crates built via contracts/*/Makefile (riscv64imac).
 exclude = [
-  "contracts/crash-commit-reveal",
-  "contracts/crash-seed-commit-sha256",
-  "contracts/crash-round-anchor",
-  "contracts/crash-settlement-split",
+  "contracts/crash-round",
 ]
 
 [profile.release]

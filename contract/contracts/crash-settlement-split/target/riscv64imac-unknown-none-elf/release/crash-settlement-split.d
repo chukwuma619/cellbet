@@ -1,1 +1,0 @@
-/Users/ebube/Desktop/Personal/cellbet/contract/contracts/crash-settlement-split//target/riscv64imac-unknown-none-elf/release/crash-settlement-split: /Users/ebube/Desktop/Personal/cellbet/contract/contracts/crash-settlement-split/src/lib.rs /Users/ebube/Desktop/Personal/cellbet/contract/contracts/crash-settlement-split/src/main.rs

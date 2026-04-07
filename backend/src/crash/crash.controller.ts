@@ -21,6 +21,14 @@ export class CrashController {
     return this.crashService.getPublicSnapshotAsync();
   }
 
+  @Get("balance")
+  getBalance(@Query("walletAddress") walletAddress: string | undefined) {
+    if (!walletAddress?.trim()) {
+      throw new BadRequestException("walletAddress is required");
+    }
+    return this.crashService.getCkbBalance(walletAddress.trim());
+  }
+
   @Get("rounds/:roundId/proof")
   getRoundProof(@Param("roundId") roundId: string) {
     return this.crashService.getRoundProof(roundId);

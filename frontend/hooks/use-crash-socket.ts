@@ -25,7 +25,10 @@ export type CrashParticipant = {
   tokenSymbol: string;
   status: string;
   cashedOutAtMultiplier?: number;
+  /** Net payout after platform fee */
   winAmount?: number;
+  grossWinAmount?: number;
+  platformFee?: number;
 };
 
 function normalizeParticipants(raw: unknown): CrashParticipant[] {
@@ -56,6 +59,20 @@ function normalizeParticipants(raw: unknown): CrashParticipant[] {
         : winRaw != null
           ? Number(winRaw)
           : undefined;
+    const grossRaw = o.grossWinAmount;
+    const grossWinAmount =
+      typeof grossRaw === "number"
+        ? grossRaw
+        : grossRaw != null
+          ? Number(grossRaw)
+          : undefined;
+    const feeRaw = o.platformFee;
+    const platformFee =
+      typeof feeRaw === "number"
+        ? feeRaw
+        : feeRaw != null
+          ? Number(feeRaw)
+          : undefined;
     out.push({
       betId,
       roundId,
@@ -71,6 +88,14 @@ function normalizeParticipants(raw: unknown): CrashParticipant[] {
       winAmount:
         winAmount !== undefined && Number.isFinite(winAmount)
           ? winAmount
+          : undefined,
+      grossWinAmount:
+        grossWinAmount !== undefined && Number.isFinite(grossWinAmount)
+          ? grossWinAmount
+          : undefined,
+      platformFee:
+        platformFee !== undefined && Number.isFinite(platformFee)
+          ? platformFee
           : undefined,
     });
   }
@@ -202,6 +227,20 @@ export function useCrashSocket() {
           : winRaw != null
             ? Number(winRaw)
             : NaN;
+      const grossRaw = payload.grossWinAmount;
+      const grossWinAmount =
+        typeof grossRaw === "number"
+          ? grossRaw
+          : grossRaw != null
+            ? Number(grossRaw)
+            : NaN;
+      const feeRaw = payload.platformFee;
+      const platformFee =
+        typeof feeRaw === "number"
+          ? feeRaw
+          : feeRaw != null
+            ? Number(feeRaw)
+            : NaN;
       if (!betId || !Number.isFinite(cashedOutAtMultiplier)) return;
       setParticipants((prev) =>
         prev.map((p) => {
@@ -212,6 +251,10 @@ export function useCrashSocket() {
             status: "cashed_out",
             cashedOutAtMultiplier,
             winAmount: Number.isFinite(winAmount) ? winAmount : undefined,
+            grossWinAmount: Number.isFinite(grossWinAmount)
+              ? grossWinAmount
+              : undefined,
+            platformFee: Number.isFinite(platformFee) ? platformFee : undefined,
           };
         }),
       );

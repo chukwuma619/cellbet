@@ -12,6 +12,20 @@ export async function fetchCrashState(): Promise<unknown> {
   return res.json();
 }
 
+export async function fetchCrashCkbBalance(
+  walletAddress: string,
+): Promise<{ ckbBalance: string }> {
+  const params = new URLSearchParams({
+    walletAddress,
+  });
+  const res = await fetch(
+    `${getApiBaseUrl()}/crash/balance?${params}`,
+    { cache: "no-store" },
+  );
+  if (!res.ok) throw new Error("Failed to load balance");
+  return res.json() as Promise<{ ckbBalance: string }>;
+}
+
 export async function fetchCrashRoundProof(roundId: string): Promise<unknown> {
   const res = await fetch(
     `${getApiBaseUrl()}/crash/rounds/${encodeURIComponent(roundId)}/proof`,

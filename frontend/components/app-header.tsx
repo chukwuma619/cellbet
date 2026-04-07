@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 
+import { CkbBalanceText } from "@/components/ckb-balance-text";
 import { useCkbAddress } from "@/hooks/use-ckb-address";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,7 +39,15 @@ export function AppHeader() {
               Connect wallet
             </Button>
           ) : (
-            <DropdownMenu>
+            <div className="flex items-center gap-2">
+              {address ? (
+                <CkbBalanceText
+                  key={address}
+                  address={address}
+                  className="max-w-44 truncate font-mono text-xs tabular-nums text-muted-foreground"
+                />
+              ) : null}
+              <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="font-mono text-xs">
                   {address ? shortAddr(address) : "Connected"}
@@ -59,6 +68,7 @@ export function AppHeader() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            </div>
           )}
         </div>
       </div>

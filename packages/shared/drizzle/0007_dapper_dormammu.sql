@@ -1,0 +1,1 @@
+ALTER TABLE "wallet_accounts" ADD COLUMN "ckb_balance" numeric(20, 8) DEFAULT '0' NOT NULL;
