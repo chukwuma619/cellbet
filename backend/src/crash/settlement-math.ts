@@ -1,4 +1,4 @@
-import { DEFAULT_CRASH_CASHOUT_FEE_BPS } from "../crash/cashout-fee";
+import { DEFAULT_CRASH_CASHOUT_FEE_BPS } from "./cashout-fee";
 
 export function grossCashoutShannons(
   stakeShannons: bigint,

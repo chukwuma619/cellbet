@@ -12,18 +12,18 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
 import { and, asc, desc, eq } from 'drizzle-orm';
-import {
-  CKB_MIN_OCCUPIED_CAPACITY_SHANNONS,
-  crashCashoutAmounts,
-  DEFAULT_CRASH_CASHOUT_FEE_BPS,
-} from '@cellbet/shared';
+import { CKB_MIN_OCCUPIED_CAPACITY_SHANNONS } from '@cellbet/shared';
 import {
   crashBets,
   crashRounds,
   type NeonDrizzle,
   walletAccounts,
 } from '../db';
-import type { CrashPhase } from '@cellbet/shared/types';
+import {
+  crashCashoutAmounts,
+  DEFAULT_CRASH_CASHOUT_FEE_BPS,
+} from './cashout-fee';
+import type { CrashPhase } from './types';
 
 import { CrashOnchainService } from '../ckb/crash-onchain.service';
 import { CkbRpcService } from '../ckb/ckb-rpc.service';

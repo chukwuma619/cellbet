@@ -7,7 +7,7 @@ export {
   multiplierAtElapsed,
   sha256HexUtf8 as sha256Hex,
   verifyCrashRound,
-} from '@cellbet/shared';
+} from './provably-fair';
 
 /** 32-byte random seed as lowercase hex (64 chars). */
 export function randomServerSeed(): string {

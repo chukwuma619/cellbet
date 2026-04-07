@@ -11,16 +11,20 @@ import {
 } from '@ckb-ccc/core';
 import {
   CKB_MIN_OCCUPIED_CAPACITY_SHANNONS,
-  decodeCrashEscrowCellDataV2,
   encodeCrashCommitCellDataV1,
+  hex32ToBytes,
+  sha256BytesUtf8,
+} from '@cellbet/shared';
+import {
+  decodeCrashEscrowCellDataV2,
   encodeCrashForfeitWitnessV1,
   encodeCrashWinWitnessV2,
   encodeRoundAnchorRevealWitness,
+} from './crash-cell-data';
+import {
   grossCashoutShannons,
-  hex32ToBytes,
-  sha256BytesUtf8,
   userNetFromGrossShannons,
-} from '@cellbet/shared';
+} from '../crash/settlement-math';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
