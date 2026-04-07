@@ -20,7 +20,6 @@ export function CrashGameClient() {
   const { address, isConnected, openConnector } = useCkbAddress();
   const [now, setNow] = useState(() => Date.now());
   const [amount, setAmount] = useState("10");
-  /** Optional entropy for provably fair outcome (§4.9); sent with bet. */
   const [clientSeed, setClientSeed] = useState("");
   const [hasOpenBet, setHasOpenBet] = useState(false);
   const [submitting, setSubmitting] = useState(false);

@@ -1,6 +1,5 @@
 import { ccc } from "@ckb-ccc/core";
 
-/** Matches `NEXT_PUBLIC_CKB_NETWORK`. */
 export type CkbNetworkId = "mainnet" | "testnet" | "devnet";
 
 export function getExpectedCkbNetwork(): CkbNetworkId {
@@ -9,10 +8,6 @@ export function getExpectedCkbNetwork(): CkbNetworkId {
   return "testnet";
 }
 
-/**
- * Build a CCC JSON-RPC client for the configured network.
- * Set `NEXT_PUBLIC_CKB_RPC_URL` to override (e.g. local devnet).
- */
 export function createConfiguredCkbClient(): ccc.Client {
   const rpc = process.env.NEXT_PUBLIC_CKB_RPC_URL?.trim();
   if (rpc) {
@@ -29,7 +24,6 @@ export function createConfiguredCkbClient(): ccc.Client {
   return new ccc.ClientPublicTestnet();
 }
 
-/** True if wallet client appears to match expected network (prefix / URL heuristic). */
 export function clientMatchesExpectedNetwork(client: ccc.Client): boolean {
   const expected = getExpectedCkbNetwork();
   const prefix = client.addressPrefix;

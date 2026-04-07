@@ -12,7 +12,6 @@ export async function fetchCrashState(): Promise<unknown> {
   return res.json();
 }
 
-/** Settled-round commit-reveal proof (same checks as client-side `verifyCrashRound`). */
 export async function fetchCrashRoundProof(roundId: string): Promise<unknown> {
   const res = await fetch(
     `${getApiBaseUrl()}/crash/rounds/${encodeURIComponent(roundId)}/proof`,
@@ -25,7 +24,6 @@ export async function fetchCrashRoundProof(roundId: string): Promise<unknown> {
 export async function postBet(body: {
   walletAddress: string;
   amount: number;
-  /** Optional user entropy (§4.9); max 256 chars. */
   clientSeed?: string;
 }): Promise<unknown> {
   const res = await fetch(`${getApiBaseUrl()}/crash/bets`, {

@@ -6,7 +6,6 @@ import { CkbRpcService } from './ckb-rpc.service';
 export class CkbController {
   constructor(private readonly ckb: CkbRpcService) {}
 
-  /** Tip block number when `CKB_RPC_URL` is configured (indexer / node sync sanity). */
   @Get('tip')
   async tip() {
     const blockNumber = await this.ckb.getTipBlockNumber();
@@ -16,7 +15,6 @@ export class CkbController {
     };
   }
 
-  /** Best-effort tx lookup (same RPC your wallets use). */
   @Get('tx/:hash')
   async tx(@Param('hash') hash: string) {
     const raw = await this.ckb.getTransaction(hash);

@@ -186,8 +186,6 @@ fn crash_spend_wrong_preimage_fails() {
     );
 }
 
-// --- crash-seed-commit-sha256 (SHA-256 of UTF-8 server_seed, matches @cellbet/shared) ---
-
 fn sha256_raw_utf8(s: &str) -> [u8; 32] {
     let mut h = Sha256::new();
     h.update(s.as_bytes());
@@ -224,7 +222,6 @@ fn crash_sha256_mint_valid_commitment_passes() {
         Bytes::new(),
     );
 
-    // Same shape as backend `randomServerSeed()`: 64-char hex string.
     let server_seed = "aabbccdd".repeat(8);
     let commitment = sha256_raw_utf8(&server_seed);
 
@@ -318,8 +315,6 @@ fn crash_sha256_spend_wrong_seed_fails() {
         "wrong UTF-8 seed must fail"
     );
 }
-
-// --- crash-round-anchor (round_id + SHA-256 commitment) ---
 
 fn deploy_round_anchor_scripts(
     context: &mut Context,
@@ -462,8 +457,6 @@ fn crash_round_anchor_wrong_round_in_witness_fails() {
         "wrong round_id in witness must fail"
     );
 }
-
-// --- crash-settlement-split ---
 
 fn encode_settlement_data_v1(
     round_id: u64,

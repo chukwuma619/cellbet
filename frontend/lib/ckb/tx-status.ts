@@ -3,10 +3,6 @@ import type { Client, ClientTransactionResponse } from "@ckb-ccc/core";
 export type TxConfirmStatus =
   | { stage: "pending" | "confirmed"; confirmations: number; tx?: ClientTransactionResponse };
 
-/**
- * Wait until a tx has at least `confirmations` confirmations (chain depth).
- * Uses CCC `client.waitTransaction`.
- */
 export async function waitForConfirmations(
   client: Client,
   txHash: string,

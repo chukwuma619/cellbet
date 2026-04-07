@@ -46,9 +46,7 @@ The Rust workspace lives under `contract/`. From that directory, or via `pnpm --
 - `test` — `cargo test`
 - `check` / `lint` / `fmt` — as defined in `contract/package.json`
 
-## Documentation
 
-- [Betting platform roadmap (CKB)](docs/BETTING_PLATFORM_NERVOS_CKB.md) — product scope, tooling, fairness, and phased checklist
 
 ## License
 

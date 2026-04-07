@@ -1,10 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-/**
- * Minimal JSON-RPC forwarder for CKB node / indexer (tip, tx lookup).
- * Set `CKB_RPC_URL` (e.g. https://testnet.ckb.dev) for `/ckb/*` health and sync checks.
- */
 @Injectable()
 export class CkbRpcService {
   private readonly log = new Logger(CkbRpcService.name);

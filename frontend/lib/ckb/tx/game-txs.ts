@@ -2,10 +2,6 @@ import type { Signer } from "@ckb-ccc/core";
 
 import { CellbetCkbError } from "../errors";
 
-/**
- * On-chain bet placement (requires deployed `crash-settlement-split` cell deps + env).
- * Wire `NEXT_PUBLIC_CELLBET_*` after devnet deployment.
- */
 export async function buildPlaceBetTx(params: {
   signer: Signer;
   roundId: bigint;

@@ -44,7 +44,6 @@ interface RuntimeRound {
   phase: CrashPhase;
   serverSeed: string;
   serverSeedHash: string;
-  /** Set when entering `locked` from combined bet client seeds (§4.9). */
   combinedClientSeed: string;
   crashMultiplier: number;
   runningDurationMs: number;
@@ -101,7 +100,6 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  /** Provably-fair proof for a settled round (works after newer rounds have started). */
   async getRoundProof(roundId: string) {
     const [row] = await this.db
       .select()
@@ -138,7 +136,6 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  /** Recent finished rounds for history UI (newest first). */
   async getRecentSettledRounds(limit: number) {
     const cap = Math.min(100, Math.max(1, Math.floor(limit)));
     const rows = await this.db
@@ -164,7 +161,6 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  /** User bet history with round context (newest first). */
   async getRecentBetsForWallet(walletAddress: string, limit: number) {
     const cap = Math.min(200, Math.max(1, Math.floor(limit)));
     const rows = await this.db
@@ -216,10 +212,8 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     if (amount < minBet || amount > maxBet) {
       throw new Error(`Amount must be between ${minBet} and ${maxBet}`);
     }
-    const seed =
-      clientSeed !== undefined && clientSeed !== null
-        ? clientSeed.trim().slice(0, 256)
-        : null;
+    const trimmed = (clientSeed?.trim() ?? "").slice(0, 256);
+    const seed = trimmed.length > 0 ? trimmed : null;
 
     await this.db
       .insert(walletAccounts)

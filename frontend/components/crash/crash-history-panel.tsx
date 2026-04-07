@@ -70,7 +70,6 @@ function betResultLabel(b: CrashBetHistoryItem) {
 
 type Props = {
   walletAddress: string | null;
-  /** When this changes (e.g. last settled round id), lists refetch */
   refreshKey?: string;
 };
 

@@ -21,7 +21,6 @@ export class CrashController {
     return this.crashService.getPublicSnapshot();
   }
 
-  /** Commit-reveal verification payload for a settled round (by id). */
   @Get("rounds/:roundId/proof")
   getRoundProof(@Param("roundId") roundId: string) {
     return this.crashService.getRoundProof(roundId);

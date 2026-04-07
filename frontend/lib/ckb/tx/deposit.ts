@@ -3,10 +3,6 @@ import { Address, Transaction, type Hex, type Signer } from "@ckb-ccc/core";
 import { clientMatchesExpectedNetwork } from "../config";
 import { CellbetCkbError, mapCkbException } from "../errors";
 
-/**
- * Send native CKB from the connected wallet to any CKB address (top up / “deposit”).
- * Completes inputs, then fees + change via `completeFeeBy`.
- */
 export async function transferCkb(params: {
   signer: Signer;
   toAddress: string;

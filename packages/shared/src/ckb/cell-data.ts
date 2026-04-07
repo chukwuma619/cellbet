@@ -1,6 +1,5 @@
 import { sha256 } from "js-sha256";
 
-/** Raw 32-byte SHA-256 of UTF-8 string (same preimage as lowercase hex from `sha256HexUtf8`). */
 export function sha256BytesUtf8(utf8String: string): Uint8Array {
   const hex = sha256(utf8String);
   const out = new Uint8Array(32);
@@ -10,7 +9,6 @@ export function sha256BytesUtf8(utf8String: string): Uint8Array {
   return out;
 }
 
-/** `crash-round-anchor`: 8-byte LE round id + 32-byte commitment. */
 export function encodeRoundAnchorCellData(
   roundId: bigint,
   commitmentSha256Raw: Uint8Array,
@@ -25,7 +23,6 @@ export function encodeRoundAnchorCellData(
   return out;
 }
 
-/** `crash-settlement-split` v1: flags must be 0. */
 export function encodeSettlementCellDataV1(
   roundId: bigint,
   userLockHash: Uint8Array,
@@ -43,7 +40,6 @@ export function encodeSettlementCellDataV1(
   return out;
 }
 
-/** Witness for spending `crash-round-anchor`: LE round id + UTF-8 server seed bytes. */
 export function encodeRoundAnchorRevealWitness(
   roundId: bigint,
   serverSeedUtf8: string,
@@ -56,7 +52,6 @@ export function encodeRoundAnchorRevealWitness(
   return out;
 }
 
-/** Witness for spending `crash-settlement-split` v1 (18 bytes). */
 export function encodeSettlementWitnessV1(params: {
   userPayoutShannons: bigint;
   housePayoutShannons: bigint;

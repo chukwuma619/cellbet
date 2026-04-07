@@ -14,7 +14,6 @@ export type CrashRoundPublic = {
   currentMultiplier: number;
   crashMultiplier?: number;
   serverSeed?: string;
-  /** Combined bet client seeds (§4.9), revealed with server seed when settled. */
   combinedClientSeed?: string;
 };
 

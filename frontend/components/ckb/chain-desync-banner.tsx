@@ -1,12 +1,7 @@
 "use client";
 
-/**
- * Shown when fast off-chain game state may disagree with confirmed chain state
- * (e.g. multiplier still animating while an on-chain anchor or settlement already finalized).
- */
 export function ChainDesyncBanner(props: {
   message: string;
-  /** e.g. dismiss until next round */
   onDismiss?: () => void;
 }) {
   const { message, onDismiss } = props;

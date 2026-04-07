@@ -1,6 +1,5 @@
 import { sha256 } from "js-sha256";
 
-/** SHA-256 of UTF-8 string, lowercase hex (matches Node `createHash("sha256").update(s, "utf8")`). */
 export function sha256HexUtf8(data: string): string {
   return sha256(data);
 }
@@ -13,15 +12,10 @@ function sha256ConcatUtf8(parts: string[]): Uint8Array {
   return new Uint8Array(h.array());
 }
 
-/**
- * Deterministic combination of per-bet client seeds (bet order = creation order).
- * Uses U+001E (record separator) between parts; each part is trimmed. Empty string if no parts.
- */
 export function combineClientSeedsOrdered(parts: string[]): string {
   return parts.map((p) => p.trim()).join("\x1e");
 }
 
-/** Provably-fair crash point from server seed, round key, and optional client entropy (§4.3). */
 export function computeCrashMultiplier(
   serverSeed: string,
   roundKey: string,
@@ -38,7 +32,6 @@ export function computeCrashMultiplier(
   return Math.min(1000, Math.max(1.01, m));
 }
 
-/** Deterministic running phase length (ms), 5s–20s. */
 export function computeRunningDurationMs(
   serverSeed: string,
   roundKey: string,
@@ -68,16 +61,11 @@ export type CrashVerifyResult = {
   runningDurationMsComputed: number;
 };
 
-/**
- * Verify commit-reveal for a Crash round: `server_seed_hash === sha256(server_seed)` and
- * `crash_multiplier === computeCrashMultiplier(server_seed, round_key, client_seed)`.
- */
 export function verifyCrashRound(input: {
   serverSeed: string;
   roundKey: string;
   serverSeedHash: string;
   crashMultiplier: number;
-  /** Combined client seeds for the round (§4.9); default `""` for legacy rounds. */
   clientSeed?: string;
 }): CrashVerifyResult {
   const clientSeed = input.clientSeed ?? "";
