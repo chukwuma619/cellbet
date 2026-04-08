@@ -15,37 +15,56 @@ export type CrashOnChainConfig = {
   feeBps: number;
 };
 
-function req(name: string): string {
-  const v = process.env[name]?.trim();
+// Next inlines only static `process.env.NEXT_PUBLIC_*` — not `process.env[name]`.
+function req(value: string | undefined, name: string): string {
+  const v = value?.trim();
   if (!v) {
     throw new Error(`Missing ${name}`);
   }
   return v;
 }
 
-function opt(name: string, defaultVal: string): string {
-  return process.env[name]?.trim() ?? defaultVal;
+function opt(value: string | undefined, defaultVal: string): string {
+  return value?.trim() ?? defaultVal;
 }
 
 export function getCrashOnChainConfigFromEnv(): CrashOnChainConfig {
   return {
-    typeScriptCodeHash: req("NEXT_PUBLIC_CRASH_ROUND_TYPE_SCRIPT_CODE_HASH") as Hex,
+    typeScriptCodeHash: req(
+      process.env.NEXT_PUBLIC_CRASH_ROUND_TYPE_SCRIPT_CODE_HASH,
+      "NEXT_PUBLIC_CRASH_ROUND_TYPE_SCRIPT_CODE_HASH",
+    ) as Hex,
     typeScriptHashType: opt(
-      "NEXT_PUBLIC_CRASH_ROUND_TYPE_SCRIPT_HASH_TYPE",
+      process.env.NEXT_PUBLIC_CRASH_ROUND_TYPE_SCRIPT_HASH_TYPE,
       "data1",
     ) as HashType,
     cellDep: {
-      outTxHash: req("NEXT_PUBLIC_CRASH_ROUND_SCRIPT_CELL_DEP_TX_HASH") as Hex,
+      outTxHash: req(
+        process.env.NEXT_PUBLIC_CRASH_ROUND_SCRIPT_CELL_DEP_TX_HASH,
+        "NEXT_PUBLIC_CRASH_ROUND_SCRIPT_CELL_DEP_TX_HASH",
+      ) as Hex,
       outputIndex: Number.parseInt(
-        req("NEXT_PUBLIC_CRASH_ROUND_SCRIPT_CELL_DEP_INDEX"),
+        req(
+          process.env.NEXT_PUBLIC_CRASH_ROUND_SCRIPT_CELL_DEP_INDEX,
+          "NEXT_PUBLIC_CRASH_ROUND_SCRIPT_CELL_DEP_INDEX",
+        ),
         10,
       ),
-      depType: opt("NEXT_PUBLIC_CRASH_ROUND_SCRIPT_CELL_DEP_TYPE", "code") as DepType,
+      depType: opt(
+        process.env.NEXT_PUBLIC_CRASH_ROUND_SCRIPT_CELL_DEP_TYPE,
+        "code",
+      ) as DepType,
     },
-    houseCkbAddress: req("NEXT_PUBLIC_HOUSE_CKB_ADDRESS"),
-    platformCkbAddress: req("NEXT_PUBLIC_PLATFORM_CKB_ADDRESS"),
+    houseCkbAddress: req(
+      process.env.NEXT_PUBLIC_HOUSE_CKB_ADDRESS,
+      "NEXT_PUBLIC_HOUSE_CKB_ADDRESS",
+    ),
+    platformCkbAddress: req(
+      process.env.NEXT_PUBLIC_PLATFORM_CKB_ADDRESS,
+      "NEXT_PUBLIC_PLATFORM_CKB_ADDRESS",
+    ),
     feeBps: Number.parseInt(
-      opt("NEXT_PUBLIC_CRASH_CASHOUT_FEE_BPS", "300"),
+      opt(process.env.NEXT_PUBLIC_CRASH_CASHOUT_FEE_BPS, "300"),
       10,
     ),
   };

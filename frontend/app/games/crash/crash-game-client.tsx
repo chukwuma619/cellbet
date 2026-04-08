@@ -146,23 +146,6 @@ export function CrashGameClient() {
   const canCashOut =
     isConnected && phase === "running" && mult > 0 && !submitting;
 
-  const stakeEscrowHint = (
-    <>
-      <p className="text-muted-foreground text-xs">
-        You sign a CKB transaction that locks your stake in an escrow cell (min.{" "}
-        {MIN_ONCHAIN_STAKE_CKB} CKB). Betting unlocks after this round is anchored
-        on-chain.
-      </p>
-      {phase === "betting" &&
-        chainRoundReady &&
-        !commitReady &&
-        bettingLeftSec > 0 && (
-          <p className="text-amber-600 dark:text-amber-500 text-xs">
-            Waiting for on-chain commitment…
-          </p>
-        )}
-    </>
-  );
 
   const betButtonLabel = canBet
     ? "Bet"
@@ -237,7 +220,7 @@ export function CrashGameClient() {
                     </span>
                   )}
                 </div>
-                {stakeEscrowHint}
+              
                 <Input
                   id="stake-a"
                   inputMode="decimal"
@@ -285,7 +268,7 @@ export function CrashGameClient() {
                     </span>
                   )}
                 </div>
-                {stakeEscrowHint}
+               
                 <Input
                   id="stake-b"
                   inputMode="decimal"
