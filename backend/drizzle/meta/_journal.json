@@ -78,6 +78,13 @@
       "when": 1775596047000,
       "tag": "0010_crash_bets_escrow_outpoint_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1776100000000,
+      "tag": "0011_crash_pool_balance",
+      "breakpoints": true
     }
   ]
 }

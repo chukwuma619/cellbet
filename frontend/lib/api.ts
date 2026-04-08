@@ -12,9 +12,15 @@ export async function fetchCrashState(): Promise<unknown> {
   return res.json();
 }
 
+export type CrashWalletBalances = {
+  onChainCkb: string;
+  poolCkb: string;
+  ckbBalance: string;
+};
+
 export async function fetchCrashCkbBalance(
   walletAddress: string,
-): Promise<{ ckbBalance: string }> {
+): Promise<CrashWalletBalances> {
   const params = new URLSearchParams({
     walletAddress,
   });
@@ -23,7 +29,29 @@ export async function fetchCrashCkbBalance(
     { cache: "no-store" },
   );
   if (!res.ok) throw new Error("Failed to load balance");
-  return res.json() as Promise<{ ckbBalance: string }>;
+  return res.json() as Promise<CrashWalletBalances>;
+}
+
+export async function postCrashDepositConfirm(body: {
+  walletAddress: string;
+  txHash: string;
+  outputIndex?: number;
+}): Promise<{ creditedCkb: string; alreadyCredited: boolean }> {
+  const res = await fetch(`${getApiBaseUrl()}/crash/deposit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string | string[];
+  };
+  if (!res.ok) {
+    const msg = Array.isArray(data?.message)
+      ? data.message.join(", ")
+      : data?.message;
+    throw new Error(msg || "Could not confirm deposit");
+  }
+  return data as { creditedCkb: string; alreadyCredited: boolean };
 }
 
 export async function fetchCrashRoundProof(roundId: string): Promise<unknown> {
@@ -39,7 +67,8 @@ export async function postBet(body: {
   walletAddress: string;
   amount: number;
   clientSeed?: string;
-  escrowTxHash: string;
+  funding?: "escrow" | "balance";
+  escrowTxHash?: string;
   escrowOutputIndex?: number;
 }): Promise<unknown> {
   const res = await fetch(`${getApiBaseUrl()}/crash/bets`, {

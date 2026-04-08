@@ -3,7 +3,7 @@
 import { CKB_MIN_OCCUPIED_CAPACITY_SHANNONS } from "@cellbet/shared";
 import { fixedPointFrom, fixedPointToString } from "@ckb-ccc/core";
 import { useCcc } from "@ckb-ccc/connector-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { CrashParticipantsTable } from "@/components/crash/crash-participants-table";
@@ -19,8 +19,16 @@ import { Label } from "@/components/ui/label";
 import { useCkbAddress } from "@/hooks/use-ckb-address";
 import { useOnChainCkbBalance } from "@/hooks/use-on-chain-ckb-balance";
 import { useCrashSocket } from "@/hooks/use-crash-socket";
-import { postBet, postCashOut } from "@/lib/api";
-import { isCrashOnChainConfigured } from "@/lib/ckb/crash-config";
+import {
+  fetchCrashCkbBalance,
+  postBet,
+  postCashOut,
+  postCrashDepositConfirm,
+} from "@/lib/api";
+import {
+  getCrashPoolDepositAddress,
+  isCrashOnChainConfigured,
+} from "@/lib/ckb/crash-config";
 import { CellbetCkbError, userMessageForCkbError } from "@/lib/ckb/errors";
 import { buildPlaceBetTx } from "@/lib/ckb/tx/game-txs";
 
@@ -35,6 +43,10 @@ export function CrashGameClient() {
   const { address, isConnected, openConnector } = useCkbAddress();
   const { signerInfo } = useCcc();
   const { shannons, displayShort, refresh } = useOnChainCkbBalance(address);
+  const [poolShannons, setPoolShannons] = useState<bigint | null>(null);
+  const [depositTx, setDepositTx] = useState("");
+  const [depositOutIdx, setDepositOutIdx] = useState("0");
+  const [depositBusy, setDepositBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [amountA, setAmountA] = useState("10");
   const [amountB, setAmountB] = useState("10");
@@ -91,12 +103,39 @@ export function CrashGameClient() {
       : 0;
 
   const ckbGameConfigured = isCrashOnChainConfigured();
+  const poolDepositAddr = getCrashPoolDepositAddress();
 
-  function balanceOkFor(amountStr: string) {
-    return (
-      shannons === null ||
-      fixedPointFrom(amountStr.trim() || "0", 8) <= shannons
-    );
+  const refreshBalances = useCallback(async () => {
+    await refresh();
+    if (!address?.trim()) {
+      setPoolShannons(null);
+      return;
+    }
+    try {
+      const b = await fetchCrashCkbBalance(address.trim());
+      setPoolShannons(fixedPointFrom(b.poolCkb || "0", 8));
+    } catch {
+      setPoolShannons(null);
+    }
+  }, [address, refresh]);
+
+  useEffect(() => {
+    void refreshBalances();
+  }, [refreshBalances]);
+
+  function stakeAmountCovered(amountStr: string) {
+    const need = fixedPointFrom(amountStr.trim() || "0", 8);
+    if (poolShannons !== null && need <= poolShannons) return true;
+    if (shannons !== null && need <= shannons) return true;
+    return false;
+  }
+
+  function applyBetIdFromResponse(slot: StakeSlot, raw: unknown) {
+    const id = (raw as { betId?: string }).betId;
+    if (typeof id === "string" && id.length > 0) {
+      if (slot === "a") setBetIdA(id);
+      else setBetIdB(id);
+    }
   }
 
   async function onBet(slot: StakeSlot) {
@@ -128,24 +167,37 @@ export function CrashGameClient() {
       );
       return;
     }
-    if (
-      shannons !== null &&
-      fixedPointFrom(amountStr.trim() || "0", 8) > shannons
-    ) {
-      toast.error("Insufficient on-chain CKB balance");
+    if (!stakeAmountCovered(amountStr)) {
+      toast.error("Insufficient pool or on-chain CKB");
       return;
     }
     setBusy(true);
     try {
-      const signer = signerInfo?.signer;
-      if (!signer) {
-        openConnector();
-        return;
-      }
       const chainRoundId = round?.chainRoundId?.trim();
       const seedHash = round?.serverSeedHash?.trim();
       if (!chainRoundId || !seedHash) {
         toast.error("Round data not ready — wait for the next betting window.");
+        return;
+      }
+      const stakeNeed = fixedPointFrom(amountStr.trim() || "0", 8);
+      const usePool =
+        poolShannons !== null && stakeNeed <= poolShannons;
+
+      if (usePool) {
+        const raw = await postBet({
+          walletAddress: address,
+          amount: n,
+          funding: "balance",
+        });
+        applyBetIdFromResponse(slot, raw);
+        await refreshBalances();
+        toast.success("Bet placed");
+        return;
+      }
+
+      const signer = signerInfo?.signer;
+      if (!signer) {
+        openConnector();
         return;
       }
       const stakeShannons = fixedPointFrom(amountStr.trim() || "0", 8);
@@ -158,15 +210,12 @@ export function CrashGameClient() {
       const raw = await postBet({
         walletAddress: address,
         amount: n,
+        funding: "escrow",
         escrowTxHash,
         escrowOutputIndex: 0,
       });
-      const placed = raw as { betId?: string };
-      if (typeof placed.betId === "string" && placed.betId.length > 0) {
-        if (slot === "a") setBetIdA(placed.betId);
-        else setBetIdB(placed.betId);
-      }
-      await refresh();
+      applyBetIdFromResponse(slot, raw);
+      await refreshBalances();
       toast.success("Bet placed");
     } catch (e) {
       if (e instanceof CellbetCkbError) {
@@ -187,7 +236,7 @@ export function CrashGameClient() {
     setBusy(true);
     try {
       await postCashOut(address, id);
-      await refresh();
+      await refreshBalances();
       if (slot === "a") setBetIdA(null);
       else setBetIdB(null);
       toast.success("Cashed out");
@@ -212,9 +261,9 @@ export function CrashGameClient() {
     commitReady;
 
   const canBetA =
-    baseCanBet && balanceOkFor(amountA) && !betIdA && !busyBetA;
+    baseCanBet && stakeAmountCovered(amountA) && !betIdA && !busyBetA;
   const canBetB =
-    baseCanBet && balanceOkFor(amountB) && !betIdB && !busyBetB;
+    baseCanBet && stakeAmountCovered(amountB) && !betIdB && !busyBetB;
 
   const canCashOutA =
     isConnected &&
@@ -234,7 +283,7 @@ export function CrashGameClient() {
       ? "Bet"
       : phase !== "betting"
         ? "Wait"
-        : shannons !== null && !balanceOkFor(amountStr)
+        : !stakeAmountCovered(amountStr)
           ? "Insufficient balance"
           : !ckbGameConfigured
             ? "Configure CKB env"
@@ -243,6 +292,42 @@ export function CrashGameClient() {
               : !commitReady
                 ? "Anchoring…"
                 : "Betting closed";
+  }
+
+  async function onConfirmDeposit() {
+    if (!address?.trim()) {
+      openConnector();
+      return;
+    }
+    const h = depositTx.trim();
+    if (!h) {
+      toast.error("Enter the deposit transaction hash");
+      return;
+    }
+    const idx = Number.parseInt(depositOutIdx.trim() || "0", 10);
+    if (!Number.isFinite(idx) || idx < 0) {
+      toast.error("Invalid output index");
+      return;
+    }
+    setDepositBusy(true);
+    try {
+      const r = await postCrashDepositConfirm({
+        walletAddress: address.trim(),
+        txHash: h,
+        outputIndex: idx,
+      });
+      await refreshBalances();
+      toast.success(
+        r.alreadyCredited
+          ? "Deposit was already credited"
+          : `Credited ${r.creditedCkb} CKB to your pool`,
+      );
+      setDepositTx("");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Deposit confirm failed");
+    } finally {
+      setDepositBusy(false);
+    }
   }
 
   return (
@@ -301,11 +386,14 @@ export function CrashGameClient() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <Label htmlFor="stake-a">Amount (CKB)</Label>
-                  {displayShort !== null && (
-                    <span className="text-muted-foreground font-mono text-xs tabular-nums">
-                      {displayShort}
-                    </span>
-                  )}
+                  <span className="text-muted-foreground font-mono text-xs tabular-nums">
+                    {poolShannons !== null && (
+                      <span className="mr-2">
+                        Pool {fixedPointToString(poolShannons, 8)}
+                      </span>
+                    )}
+                    {displayShort !== null && <span>L1 {displayShort}</span>}
+                  </span>
                 </div>
 
                 <Input
@@ -352,11 +440,14 @@ export function CrashGameClient() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <Label htmlFor="stake-b">Amount (CKB)</Label>
-                  {displayShort !== null && (
-                    <span className="text-muted-foreground font-mono text-xs tabular-nums">
-                      {displayShort}
-                    </span>
-                  )}
+                  <span className="text-muted-foreground font-mono text-xs tabular-nums">
+                    {poolShannons !== null && (
+                      <span className="mr-2">
+                        Pool {fixedPointToString(poolShannons, 8)}
+                      </span>
+                    )}
+                    {displayShort !== null && <span>L1 {displayShort}</span>}
+                  </span>
                 </div>
 
                 <Input
@@ -392,7 +483,53 @@ export function CrashGameClient() {
         </div>
       </div>
 
-      <div className="col-span-1 order-2 md:order-1">
+      <div className="col-span-1 order-2 md:order-1 space-y-3">
+        {poolDepositAddr ? (
+          <Card className="border-border/80">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Pool balance</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <p className="text-muted-foreground leading-snug">
+                Send CKB here, then submit the tx hash to credit your pool
+                balance.
+              </p>
+              <p className="font-mono text-xs break-all rounded-md bg-muted/50 p-2">
+                {poolDepositAddr}
+              </p>
+              <div className="space-y-1">
+                <Label htmlFor="dep-tx">Deposit tx hash</Label>
+                <Input
+                  id="dep-tx"
+                  className="font-mono text-xs"
+                  placeholder="0x…"
+                  value={depositTx}
+                  onChange={(e) => setDepositTx(e.target.value)}
+                  disabled={depositBusy}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="dep-idx">Output index</Label>
+                <Input
+                  id="dep-idx"
+                  inputMode="numeric"
+                  value={depositOutIdx}
+                  onChange={(e) => setDepositOutIdx(e.target.value)}
+                  disabled={depositBusy}
+                />
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full"
+                disabled={depositBusy || !isConnected}
+                onClick={() => void onConfirmDeposit()}
+              >
+                {depositBusy ? "Confirming…" : "Confirm deposit"}
+              </Button>
+            </CardContent>
+          </Card>
+        ) : null}
         <Card className="border-border/80 h-full">
           <CardContent className="pt-6 h-full">
             <CrashParticipantsTable participants={participants} />

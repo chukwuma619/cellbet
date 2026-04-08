@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -8,6 +9,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 
 export class PlaceBetDto {
@@ -25,10 +27,14 @@ export class PlaceBetDto {
   @MaxLength(256)
   clientSeed?: string;
 
-  /** Transaction hash from `buildPlaceBetTx` (escrow output). */
+  @IsOptional()
+  @IsIn(['escrow', 'balance'])
+  funding?: 'escrow' | 'balance';
+
+  @ValidateIf((o: PlaceBetDto) => o.funding !== 'balance')
   @IsString()
   @IsNotEmpty()
-  escrowTxHash!: string;
+  escrowTxHash?: string;
 
   @IsOptional()
   @Type(() => Number)

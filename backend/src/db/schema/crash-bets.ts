@@ -29,6 +29,7 @@ export const crashBets = pgTable('crash_bets', {
   escrowOutputIndex: integer('escrow_output_index').notNull().default(0),
   /** Win / forfeit settlement tx hash when settled on-chain. */
   settlementTxHash: text('settlement_tx_hash'),
+  fundingSource: text('funding_source').notNull().default('escrow'),
   createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
