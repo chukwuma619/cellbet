@@ -44,6 +44,10 @@ const RBF_ANCHOR_FLAT_PADDING_SHANNONS = 25_000n;
 const RBF_RETRY_EXTRA_SHANNONS = 50_000n;
 const MAX_RBF_SEND_ATTEMPTS = 12;
 
+/** Poll until commit output is visible (confirmation / indexer lag). */
+const COMMIT_CELL_POLL_MS = 2000;
+const COMMIT_CELL_POLL_MAX_ATTEMPTS = 45;
+
 export type CrashEscrowRef = {
   txHash: `0x${string}`;
   outputIndex: number;
@@ -73,6 +77,30 @@ function hexOutputDataToBytes(od: string): Uint8Array {
     throw new Error('Invalid output data hex length');
   }
   return Uint8Array.from(Buffer.from(hex, 'hex'));
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * CCC `prepareTransaction` / sighash prep can re-serialize WitnessArgs and drop
+ * `input_type`; the type script then sees wrong bytes (e.g. RoundMismatch).
+ */
+function restoreWitnessInputTypeAt(
+  tx: Transaction,
+  index: number,
+  inputType: Uint8Array,
+): void {
+  const cur = tx.getWitnessArgsAt(index) ?? WitnessArgs.from({});
+  tx.setWitnessArgsAt(
+    index,
+    WitnessArgs.from({
+      lock: cur.lock,
+      inputType: hexFrom(inputType),
+      outputType: cur.outputType,
+    }),
+  );
 }
 
 @Injectable()
@@ -198,12 +226,17 @@ export class CrashOnchainService {
     client: Client,
     signer: SignerCkbPrivateKey,
     tx: Transaction,
+    opts?: {
+      /** Runs after prepareTransaction (sighash dummy lock); restore type-script payload here. */
+      afterPrepare?: (prepared: Transaction) => void | Promise<void>;
+    },
   ): Promise<`0x${string}`> {
     const { script: houseLock } = await signer.getRecommendedAddressObj();
 
     for (let attempt = 0; attempt < MAX_RBF_SEND_ATTEMPTS; attempt++) {
       try {
         const prepared = await signer.prepareTransaction(tx);
+        await opts?.afterPrepare?.(prepared);
         const signed = await signer.signOnlyTransaction(prepared);
         return await client.sendTransaction(signed);
       } catch (e) {
@@ -273,12 +306,16 @@ export class CrashOnchainService {
     });
     await cellInput.completeExtraInfos(client);
 
-    let sourceCell =
-      (await client.getCellLive(outPoint, true, true)) ??
-      (await client.getCellLiveNoCache(outPoint, true, true));
-    if (!sourceCell) {
+    let sourceCell: Awaited<ReturnType<Client['getCellLive']>> = undefined;
+    for (let attempt = 0; attempt < COMMIT_CELL_POLL_MAX_ATTEMPTS; attempt++) {
+      sourceCell =
+        (await client.getCellLive(outPoint, true, true)) ??
+        (await client.getCellLiveNoCache(outPoint, true, true));
+      if (sourceCell) {
+        break;
+      }
       await this.clearCccClientCellAndTxCache(client);
-      sourceCell = await client.getCellLiveNoCache(outPoint, true, true);
+      await sleepMs(COMMIT_CELL_POLL_MS);
     }
     if (!sourceCell) {
       throw new Error(
@@ -337,7 +374,11 @@ export class CrashOnchainService {
       }),
     );
 
-    return this.submitHouseTx(client, signer, tx);
+    return this.submitHouseTx(client, signer, tx, {
+      afterPrepare: (prepared) => {
+        restoreWitnessInputTypeAt(prepared, 0, witnessBytes);
+      },
+    });
   }
 
   async verifyUserEscrowCell(params: {
@@ -417,7 +458,9 @@ export class CrashOnchainService {
     }
     const houseAddr = await signer.getRecommendedAddressObj();
     const platformAddr = await Address.fromString(platformStr, client);
-    const expectedHouseHash = hex32ToBytes(Script.from(houseAddr.script).hash());
+    const expectedHouseHash = hex32ToBytes(
+      Script.from(houseAddr.script).hash(),
+    );
     const expectedPlatformHash = hex32ToBytes(
       Script.from(platformAddr.script).hash(),
     );
@@ -548,7 +591,11 @@ export class CrashOnchainService {
       }),
     );
 
-    return this.submitHouseTx(client, signer, tx);
+    return this.submitHouseTx(client, signer, tx, {
+      afterPrepare: (prepared) => {
+        restoreWitnessInputTypeAt(prepared, 0, winBytes);
+      },
+    });
   }
 
   async settleForfeitOnChain(params: {
@@ -613,7 +660,11 @@ export class CrashOnchainService {
       }),
     );
 
-    return this.submitHouseTx(client, signer, tx);
+    return this.submitHouseTx(client, signer, tx, {
+      afterPrepare: (prepared) => {
+        restoreWitnessInputTypeAt(prepared, 0, forfeitBytes);
+      },
+    });
   }
 }
 
