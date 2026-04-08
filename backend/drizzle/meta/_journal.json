@@ -71,6 +71,13 @@
       "when": 1775596046938,
       "tag": "0009_youthful_shiva",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1775596047000,
+      "tag": "0010_crash_bets_escrow_outpoint_unique",
+      "breakpoints": true
     }
   ]
 }

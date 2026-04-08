@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, or } from 'drizzle-orm';
 import { CKB_MIN_OCCUPIED_CAPACITY_SHANNONS } from '@cellbet/shared';
 import {
   crashBets,
@@ -155,6 +155,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
         serverSeedHash: r.serverSeedHash,
         bettingEndsAt: r.bettingEndsAt,
         currentMultiplier: r.currentMultiplier,
+        commitAnchored: false,
         crashMultiplier:
           r.phase === 'crashed' || r.phase === 'settled'
             ? r.crashMultiplier
@@ -177,6 +178,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       serverSeedHash: string;
       bettingEndsAt: number;
       currentMultiplier: number;
+      commitAnchored: boolean;
       crashMultiplier?: number;
       serverSeed?: string;
       combinedClientSeed?: string;
@@ -188,6 +190,14 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     if (!r || !base.round) {
       return { round: base.round, participants: [] };
     }
+
+    const [roundMeta] = await this.db
+      .select({ commitTxHash: crashRounds.commitTxHash })
+      .from(crashRounds)
+      .where(eq(crashRounds.id, r.dbRoundId))
+      .limit(1);
+    const commitAnchored = Boolean(roundMeta?.commitTxHash?.trim());
+    const round = { ...base.round, commitAnchored };
 
     const feeBps = this.cashoutFeeBps();
 
@@ -239,7 +249,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       };
     });
 
-    return { round: base.round, participants };
+    return { round, participants };
   }
 
   private async pushPublicState() {
@@ -383,6 +393,17 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     const newShannons = fixedPointFrom(amountStr, 8);
     const feeBps = this.cashoutFeeBps();
 
+    const [roundGate] = await this.db
+      .select({ commitTxHash: crashRounds.commitTxHash })
+      .from(crashRounds)
+      .where(eq(crashRounds.id, r.dbRoundId))
+      .limit(1);
+    if (!roundGate?.commitTxHash?.trim()) {
+      throw new Error(
+        'This round is not anchored on-chain yet (commit cell missing). Wait a few seconds and try again.',
+      );
+    }
+
     const h = escrowTxHash?.trim();
     if (!h) {
       throw new Error(
@@ -393,8 +414,26 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       escrowOutputIndex !== undefined && escrowOutputIndex !== null
         ? Math.floor(escrowOutputIndex)
         : 0;
+    const hNorm = h.startsWith('0x') ? h : `0x${h}`;
+    const [dupBet] = await this.db
+      .select({ id: crashBets.id })
+      .from(crashBets)
+      .where(
+        and(
+          eq(crashBets.roundId, r.dbRoundId),
+          or(eq(crashBets.escrowTxHash, h), eq(crashBets.escrowTxHash, hNorm)),
+          eq(crashBets.escrowOutputIndex, outIdx),
+        ),
+      )
+      .limit(1);
+    if (dupBet) {
+      throw new Error(
+        'This escrow output is already registered for a bet in this round.',
+      );
+    }
+
     await this.onchain.verifyUserEscrowCell({
-      escrowTxHash: h,
+      escrowTxHash: hNorm,
       escrowOutputIndex: outIdx,
       userCkbAddress: walletAddress,
       chainRoundId: r.chainRoundId,
@@ -419,7 +458,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
         clientSeed: seed,
         amount: amountStr,
         status: 'pending',
-        escrowTxHash: h,
+        escrowTxHash: hNorm,
         escrowOutputIndex: outIdx,
       })
       .returning();
@@ -568,6 +607,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
           commitOutputIndex: ref.outputIndex,
         })
         .where(eq(crashRounds.id, dbRoundId));
+      void this.pushPublicState();
     } catch (e) {
       this.logger.error(
         `Anchor commit cell failed for round ${dbRoundId}`,
@@ -578,7 +618,6 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
 
   private async maybeRevealCommitForRound(
     dbRoundId: string,
-    chainRoundId: bigint,
     serverSeedUtf8: string,
   ) {
     const [round] = await this.db
@@ -600,7 +639,6 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
           txHash: txH as `0x${string}`,
           outputIndex: round.commitOutputIndex ?? 0,
         },
-        chainRoundId,
         serverSeedUtf8,
       });
       await this.db
@@ -818,20 +856,27 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       const stake = Number(bet.amount);
       let forfeitTx: string | undefined;
       if (bet.escrowTxHash?.trim()) {
-        try {
-          const txH = bet.escrowTxHash.startsWith('0x')
-            ? bet.escrowTxHash
-            : `0x${bet.escrowTxHash}`;
-          forfeitTx = await this.onchain.settleForfeitOnChain({
-            escrow: {
-              txHash: txH as `0x${string}`,
-              outputIndex: bet.escrowOutputIndex ?? 0,
-            },
-          });
-        } catch (e) {
-          this.logger.error(
-            `On-chain forfeit failed for bet ${bet.id}: ${String(e)}`,
-          );
+        const txH = bet.escrowTxHash.startsWith('0x')
+          ? bet.escrowTxHash
+          : `0x${bet.escrowTxHash}`;
+        const maxAttempts = 3;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          try {
+            forfeitTx = await this.onchain.settleForfeitOnChain({
+              escrow: {
+                txHash: txH as `0x${string}`,
+                outputIndex: bet.escrowOutputIndex ?? 0,
+              },
+            });
+            break;
+          } catch (e) {
+            this.logger.error(
+              `On-chain forfeit failed for bet ${bet.id} (attempt ${attempt}/${maxAttempts}): ${String(e)}`,
+            );
+            if (attempt < maxAttempts) {
+              await new Promise((r) => setTimeout(r, 500 * attempt));
+            }
+          }
         }
       } else {
         this.logger.warn(
@@ -872,11 +917,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       combinedClientSeed: r.combinedClientSeed,
     });
 
-    void this.maybeRevealCommitForRound(
-      r.dbRoundId,
-      r.chainRoundId,
-      r.serverSeed,
-    );
+    void this.maybeRevealCommitForRound(r.dbRoundId, r.serverSeed);
 
     this.schedulePhase(() => {
       void this.startNewRound().catch((err) =>

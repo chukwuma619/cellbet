@@ -13,6 +13,7 @@ export type CrashRoundPublic = {
   serverSeedHash: string;
   bettingEndsAt: number;
   currentMultiplier: number;
+  commitAnchored?: boolean;
   crashMultiplier?: number;
   serverSeed?: string;
   combinedClientSeed?: string;
@@ -115,6 +116,7 @@ function normalizeRound(
         ? new Date(be).getTime()
         : Date.now();
   const chainRaw = raw.chainRoundId;
+  const ca = raw.commitAnchored;
   return {
     id: String(raw.id),
     roundKey: String(raw.roundKey ?? ""),
@@ -124,6 +126,8 @@ function normalizeRound(
     serverSeedHash: String(raw.serverSeedHash ?? ""),
     bettingEndsAt,
     currentMultiplier: Number(raw.currentMultiplier ?? 1),
+    commitAnchored:
+      ca === true || ca === "true" || ca === 1,
     crashMultiplier:
       raw.crashMultiplier !== undefined && raw.crashMultiplier !== null
         ? Number(raw.crashMultiplier)
@@ -266,6 +270,10 @@ export function useCrashSocket() {
 
     socket.on("crash:phase", (payload: Record<string, unknown>) => {
       setRound((prev) => {
+        const newId =
+          payload.roundId != null ? String(payload.roundId) : "";
+        const idChanged =
+          prev != null && newId !== "" && prev.id !== newId;
         const merged: Record<string, unknown> = {
           id: payload.roundId ?? prev?.id ?? "",
           roundKey: payload.roundKey ?? prev?.roundKey ?? "",
@@ -276,6 +284,9 @@ export function useCrashSocket() {
           bettingEndsAt:
             payload.bettingEndsAt ?? prev?.bettingEndsAt ?? Date.now(),
           currentMultiplier: prev?.currentMultiplier ?? 1,
+          commitAnchored: idChanged
+            ? false
+            : payload.commitAnchored ?? prev?.commitAnchored,
           crashMultiplier: prev?.crashMultiplier,
           serverSeed: prev?.serverSeed,
           combinedClientSeed: prev?.combinedClientSeed,

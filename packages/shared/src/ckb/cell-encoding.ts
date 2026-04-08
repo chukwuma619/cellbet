@@ -32,6 +32,23 @@ export function encodeCrashCommitCellDataV1(
   return out;
 }
 
+/** Decode 42-byte crash commit cell data (v1). */
+export function decodeCrashCommitCellDataV1(data: Uint8Array): {
+  roundId: bigint;
+  commitmentSha256: Uint8Array;
+} {
+  if (data.length !== 42) {
+    throw new Error("commit v1 cell data must be 42 bytes");
+  }
+  if (data[0] !== 1 || data[1] !== 0) {
+    throw new Error("unexpected crash commit cell version/state");
+  }
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const roundId = view.getBigUint64(2, true);
+  const commitmentSha256 = data.slice(10, 42);
+  return { roundId, commitmentSha256 };
+}
+
 /**
  * Escrow cell for `crash-round` (148 bytes): platform lock + fee bps for on-chain win settlement.
  */

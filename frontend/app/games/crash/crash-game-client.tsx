@@ -134,15 +134,49 @@ export function CrashGameClient() {
   const chainRoundReady = Boolean(
     round?.chainRoundId && round.chainRoundId.length > 0,
   );
+  const commitReady = round?.commitAnchored === true;
   const canBet =
     isConnected &&
     ckbGameConfigured &&
     phase === "betting" &&
     bettingLeftSec > 0 &&
     balanceOk &&
-    chainRoundReady;
+    chainRoundReady &&
+    commitReady;
   const canCashOut =
     isConnected && phase === "running" && mult > 0 && !submitting;
+
+  const stakeEscrowHint = (
+    <>
+      <p className="text-muted-foreground text-xs">
+        You sign a CKB transaction that locks your stake in an escrow cell (min.{" "}
+        {MIN_ONCHAIN_STAKE_CKB} CKB). Betting unlocks after this round is anchored
+        on-chain.
+      </p>
+      {phase === "betting" &&
+        chainRoundReady &&
+        !commitReady &&
+        bettingLeftSec > 0 && (
+          <p className="text-amber-600 dark:text-amber-500 text-xs">
+            Waiting for on-chain commitment…
+          </p>
+        )}
+    </>
+  );
+
+  const betButtonLabel = canBet
+    ? "Bet"
+    : phase !== "betting"
+      ? "Wait"
+      : shannons !== null && !balanceOk
+        ? "Insufficient balance"
+        : !ckbGameConfigured
+          ? "Configure CKB env"
+          : !chainRoundReady
+            ? "Syncing round…"
+            : !commitReady
+              ? "Anchoring…"
+              : "Betting closed";
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
@@ -203,10 +237,7 @@ export function CrashGameClient() {
                     </span>
                   )}
                 </div>
-                <p className="text-muted-foreground text-xs">
-                  You sign a CKB transaction that locks your stake in an escrow
-                  cell (min. {MIN_ONCHAIN_STAKE_CKB} CKB).
-                </p>
+                {stakeEscrowHint}
                 <Input
                   id="stake-a"
                   inputMode="decimal"
@@ -224,17 +255,7 @@ export function CrashGameClient() {
                   disabled={!canBet || submitting}
                   onClick={() => void onBet()}
                 >
-                  {canBet
-                    ? "Bet"
-                    : phase === "betting"
-                      ? shannons !== null && !balanceOk
-                        ? "Insufficient balance"
-                        : !ckbGameConfigured
-                          ? "Configure CKB env"
-                          : !chainRoundReady
-                            ? "Syncing round…"
-                            : "Betting closed"
-                      : "Wait"}
+                  {betButtonLabel}
                 </Button>
                 <Button
                   variant="secondary"
@@ -264,10 +285,7 @@ export function CrashGameClient() {
                     </span>
                   )}
                 </div>
-                <p className="text-muted-foreground text-xs">
-                  You sign a CKB transaction that locks your stake in an escrow
-                  cell (min. {MIN_ONCHAIN_STAKE_CKB} CKB).
-                </p>
+                {stakeEscrowHint}
                 <Input
                   id="stake-b"
                   inputMode="decimal"
@@ -285,17 +303,7 @@ export function CrashGameClient() {
                   disabled={!canBet || submitting}
                   onClick={() => void onBet()}
                 >
-                  {canBet
-                    ? "Bet"
-                    : phase === "betting"
-                      ? shannons !== null && !balanceOk
-                        ? "Insufficient balance"
-                        : !ckbGameConfigured
-                          ? "Configure CKB env"
-                          : !chainRoundReady
-                            ? "Syncing round…"
-                            : "Betting closed"
-                      : "Wait"}
+                  {betButtonLabel}
                 </Button>
                 <Button
                   variant="secondary"

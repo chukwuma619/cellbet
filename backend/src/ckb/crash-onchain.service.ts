@@ -8,9 +8,11 @@ import {
   Transaction,
   WitnessArgs,
   hexFrom,
+  type Client,
 } from '@ckb-ccc/core';
 import {
   CKB_MIN_OCCUPIED_CAPACITY_SHANNONS,
+  decodeCrashCommitCellDataV1,
   encodeCrashCommitCellDataV1,
   hex32ToBytes,
   sha256BytesUtf8,
@@ -32,6 +34,16 @@ import { CkbRpcService } from './ckb-rpc.service';
 
 const FEE_BUFFER_SHANNONS = 2_000000n;
 
+const POOL_FEE_RATE_NUM = 180n;
+const POOL_FEE_RATE_DEN = 100n;
+const ANCHOR_POOL_FEE_RATE_NUM = 200n;
+const ANCHOR_POOL_FEE_RATE_DEN = 100n;
+
+const RBF_SHANNONS_PER_1000_BYTES = 2500n;
+const RBF_ANCHOR_FLAT_PADDING_SHANNONS = 25_000n;
+const RBF_RETRY_EXTRA_SHANNONS = 50_000n;
+const MAX_RBF_SEND_ATTEMPTS = 12;
+
 export type CrashEscrowRef = {
   txHash: `0x${string}`;
   outputIndex: number;
@@ -40,6 +52,27 @@ export type CrashEscrowRef = {
 function normalizeTxHash(h: string): `0x${string}` {
   const t = h.trim();
   return (t.startsWith('0x') ? t : `0x${t}`) as `0x${string}`;
+}
+
+function parsePoolRejectedRbf(err: unknown): {
+  current: bigint;
+  required: bigint;
+} | null {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (!msg.includes('PoolRejectedRBF')) return null;
+  const cur = msg.match(/current fee is (\d+)/);
+  const req = msg.match(/expect it to >= (\d+)/);
+  if (!cur?.[1] || !req?.[1]) return null;
+  return { current: BigInt(cur[1]), required: BigInt(req[1]) };
+}
+
+function hexOutputDataToBytes(od: string): Uint8Array {
+  const s = od.trim();
+  const hex = s.startsWith('0x') || s.startsWith('0X') ? s.slice(2) : s;
+  if (hex.length % 2 === 1) {
+    throw new Error('Invalid output data hex length');
+  }
+  return Uint8Array.from(Buffer.from(hex, 'hex'));
 }
 
 @Injectable()
@@ -101,10 +134,90 @@ export class CrashOnchainService {
     return [crashDep, ...secpDeps];
   }
 
-  /**
-   * House publishes commitment cell (round id + sha256(server seed utf8)).
-   * Output index is always 0 for this tx shape.
-   */
+  private async clearCccClientCellAndTxCache(client: Client): Promise<void> {
+    const cache = client.cache as { clear?: () => void | Promise<void> };
+    if (typeof cache.clear === 'function') {
+      await cache.clear();
+    }
+  }
+
+  private async poolFeeRate(
+    client: ReturnType<CkbRpcService['getCccClient']>,
+    kind: 'default' | 'anchor' = 'default',
+  ): Promise<bigint> {
+    const base = await client.getFeeRate();
+    const br = typeof base === 'bigint' ? base : BigInt(String(base));
+    if (kind === 'anchor') {
+      return (
+        (br * ANCHOR_POOL_FEE_RATE_NUM + ANCHOR_POOL_FEE_RATE_DEN - 1n) /
+        ANCHOR_POOL_FEE_RATE_DEN
+      );
+    }
+    return (
+      (br * POOL_FEE_RATE_NUM + POOL_FEE_RATE_DEN - 1n) / POOL_FEE_RATE_DEN
+    );
+  }
+
+  private shrinkHouseChangeForExtraFee(
+    tx: Transaction,
+    houseLock: Script,
+    extraFeeShannons: bigint,
+  ): void {
+    if (extraFeeShannons <= 0n) return;
+    for (let i = tx.outputs.length - 1; i >= 0; i--) {
+      const out = tx.outputs[i];
+      if (out.type) continue;
+      if (!out.lock.eq(houseLock)) continue;
+      const cap = BigInt(out.capacity.toString());
+      const next = cap - extraFeeShannons;
+      if (next < CKB_MIN_OCCUPIED_CAPACITY_SHANNONS) continue;
+      out.capacity = next;
+      return;
+    }
+    throw new Error(
+      'Could not add CKB fee headroom: no house change output with spare capacity',
+    );
+  }
+
+  private async applyAnchorInitialRbfHeadroom(
+    tx: Transaction,
+    signer: SignerCkbPrivateKey,
+    houseLock: Script,
+  ): Promise<void> {
+    const preview = await signer.prepareTransaction(tx);
+    const sz = BigInt(preview.toBytes().length + 4);
+    const fromSize = (RBF_SHANNONS_PER_1000_BYTES * sz + 999n) / 1000n;
+    this.shrinkHouseChangeForExtraFee(
+      tx,
+      houseLock,
+      fromSize + RBF_ANCHOR_FLAT_PADDING_SHANNONS,
+    );
+  }
+
+  private async submitHouseTx(
+    client: Client,
+    signer: SignerCkbPrivateKey,
+    tx: Transaction,
+  ): Promise<`0x${string}`> {
+    const { script: houseLock } = await signer.getRecommendedAddressObj();
+
+    for (let attempt = 0; attempt < MAX_RBF_SEND_ATTEMPTS; attempt++) {
+      try {
+        const prepared = await signer.prepareTransaction(tx);
+        const signed = await signer.signOnlyTransaction(prepared);
+        return await client.sendTransaction(signed);
+      } catch (e) {
+        const rbf = parsePoolRejectedRbf(e);
+        if (!rbf || attempt === MAX_RBF_SEND_ATTEMPTS - 1) {
+          throw e;
+        }
+        const bump = rbf.required - rbf.current + RBF_RETRY_EXTRA_SHANNONS;
+        this.shrinkHouseChangeForExtraFee(tx, houseLock, bump);
+      }
+    }
+    throw new Error('submitHouseTx: exhausted RBF retries');
+  }
+
   async anchorCommitForRound(params: {
     chainRoundId: bigint;
     serverSeedUtf8: string;
@@ -114,6 +227,7 @@ export class CrashOnchainService {
       throw new Error('HOUSE_CKB_PRIVATE_KEY is not configured');
     }
     const client = this.ckbRpc.getCccClient();
+    await this.clearCccClientCellAndTxCache(client);
     const commitment = sha256BytesUtf8(params.serverSeedUtf8);
     const data = encodeCrashCommitCellDataV1(params.chainRoundId, commitment);
     const typeScript = this.crashTypeScript();
@@ -129,25 +243,17 @@ export class CrashOnchainService {
       witnesses: [],
     });
 
-    tx.addOutput(
-      {
-        capacity: CKB_MIN_OCCUPIED_CAPACITY_SHANNONS,
-        lock: houseAddr.script,
-        type: typeScript,
-      },
-      hexFrom(data),
-    );
+    tx.addOutput({ lock: houseAddr.script, type: typeScript }, hexFrom(data));
 
     await tx.completeInputsByCapacity(signer);
-    await tx.completeFeeBy(signer);
-    const txHash = await signer.sendTransaction(tx);
+    await tx.completeFeeBy(signer, await this.poolFeeRate(client, 'anchor'));
+    await this.applyAnchorInitialRbfHeadroom(tx, signer, houseAddr.script);
+    const txHash = await this.submitHouseTx(client, signer, tx);
     return { txHash, outputIndex: 0 };
   }
 
-  /** Spend commitment cell to reveal server seed (proves hash preimage on-chain). */
   async revealCommitForRound(params: {
     commit: CrashEscrowRef;
-    chainRoundId: bigint;
     serverSeedUtf8: string;
   }): Promise<`0x${string}`> {
     const signer = this.houseSignerOrNull();
@@ -157,15 +263,36 @@ export class CrashOnchainService {
     const client = this.ckbRpc.getCccClient();
     const houseAddr = await signer.getRecommendedAddressObj();
 
+    const outPoint = {
+      txHash: normalizeTxHash(params.commit.txHash),
+      index: Number(params.commit.outputIndex),
+    };
+
     const cellInput = CellInput.from({
-      previousOutput: {
-        txHash: params.commit.txHash,
-        index: params.commit.outputIndex,
-      },
+      previousOutput: outPoint,
     });
     await cellInput.completeExtraInfos(client);
-    const cell = await cellInput.getCell(client);
-    const cap = BigInt(cell.cellOutput.capacity.toString());
+
+    let sourceCell =
+      (await client.getCellLive(outPoint, true, true)) ??
+      (await client.getCellLiveNoCache(outPoint, true, true));
+    if (!sourceCell) {
+      await this.clearCccClientCellAndTxCache(client);
+      sourceCell = await client.getCellLiveNoCache(outPoint, true, true);
+    }
+    if (!sourceCell) {
+      throw new Error(
+        `Commit cell not found or not live yet (confirm commit tx, output index, or wait for indexer). out_point=${outPoint.txHash}:${String(outPoint.index)}`,
+      );
+    }
+
+    const cap = BigInt(sourceCell.cellOutput.capacity.toString());
+    const od = sourceCell.outputData;
+    if (!od || od === '0x') {
+      throw new Error('Commit cell has no type data');
+    }
+    const commitBytes = hexOutputDataToBytes(od);
+    const { roundId: commitRoundId } = decodeCrashCommitCellDataV1(commitBytes);
 
     const tx = Transaction.from({
       version: 0,
@@ -181,19 +308,36 @@ export class CrashOnchainService {
     tx.addOutput({ lock: houseAddr.script, capacity: cap }, '0x');
 
     const witnessBytes = encodeRoundAnchorRevealWitness(
-      params.chainRoundId,
+      commitRoundId,
       params.serverSeedUtf8,
     );
+    const witnessPlaceholder = new Uint8Array(witnessBytes.length);
     tx.setWitnessArgsAt(
       0,
       WitnessArgs.from({
-        inputType: hexFrom(witnessBytes),
+        inputType: hexFrom(witnessPlaceholder),
       }),
     );
 
-    await tx.prepareSighashAllWitness(houseAddr.script, 85, client);
-    const signed = await signer.signOnlyTransaction(tx);
-    return signer.sendTransaction(signed);
+    await tx.completeFeeChangeToOutput(
+      signer,
+      0,
+      await this.poolFeeRate(client),
+      undefined,
+      { shouldAddInputs: false },
+    );
+
+    const afterFee = tx.getWitnessArgsAt(0) ?? WitnessArgs.from({});
+    tx.setWitnessArgsAt(
+      0,
+      WitnessArgs.from({
+        lock: afterFee.lock,
+        inputType: hexFrom(witnessBytes),
+        outputType: afterFee.outputType,
+      }),
+    );
+
+    return this.submitHouseTx(client, signer, tx);
   }
 
   async verifyUserEscrowCell(params: {
@@ -257,6 +401,35 @@ export class CrashOnchainService {
     const userHash = hex32ToBytes(userAddr.script.hash());
     if (!buffersEqual(userHash, escrowData.userLockHash)) {
       throw new Error('Escrow user lock does not match wallet address');
+    }
+
+    const signer = this.houseSignerOrNull();
+    if (!signer) {
+      throw new Error(
+        'HOUSE_CKB_PRIVATE_KEY is required to validate house/platform locks on escrow cells',
+      );
+    }
+    const platformStr =
+      this.config.get<string>('PLATFORM_CKB_ADDRESS')?.trim() ??
+      this.config.get<string>('NEXT_PUBLIC_PLATFORM_CKB_ADDRESS')?.trim();
+    if (!platformStr) {
+      throw new Error('PLATFORM_CKB_ADDRESS is not set');
+    }
+    const houseAddr = await signer.getRecommendedAddressObj();
+    const platformAddr = await Address.fromString(platformStr, client);
+    const expectedHouseHash = hex32ToBytes(Script.from(houseAddr.script).hash());
+    const expectedPlatformHash = hex32ToBytes(
+      Script.from(platformAddr.script).hash(),
+    );
+    if (!buffersEqual(expectedHouseHash, escrowData.houseLockHash)) {
+      throw new Error(
+        'Escrow house lock hash does not match configured house wallet',
+      );
+    }
+    if (!buffersEqual(expectedPlatformHash, escrowData.platformLockHash)) {
+      throw new Error(
+        'Escrow platform lock hash does not match PLATFORM_CKB_ADDRESS',
+      );
     }
   }
 
@@ -347,7 +520,11 @@ export class CrashOnchainService {
     );
 
     await tx.completeInputsByCapacity(signer, FEE_BUFFER_SHANNONS);
-    await tx.completeFeeChangeToOutput(signer, 2);
+    await tx.completeFeeChangeToOutput(
+      signer,
+      2,
+      await this.poolFeeRate(client),
+    );
 
     const houseOut = tx.getOutput(2);
     if (!houseOut) {
@@ -371,9 +548,7 @@ export class CrashOnchainService {
       }),
     );
 
-    await tx.prepareSighashAllWitness(houseAddr.script, 85, client);
-    const signed = await signer.signOnlyTransaction(tx);
-    return signer.sendTransaction(signed);
+    return this.submitHouseTx(client, signer, tx);
   }
 
   async settleForfeitOnChain(params: {
@@ -412,17 +587,33 @@ export class CrashOnchainService {
     tx.addOutput({ lock: houseAddr.script, capacity: cap }, '0x');
 
     const forfeitBytes = encodeCrashForfeitWitnessV1(0);
-
+    const forfeitPlaceholder = new Uint8Array(forfeitBytes.length);
     tx.setWitnessArgsAt(
       0,
       WitnessArgs.from({
-        inputType: hexFrom(forfeitBytes),
+        inputType: hexFrom(forfeitPlaceholder),
       }),
     );
 
-    await tx.prepareSighashAllWitness(houseAddr.script, 85, client);
-    const signed = await signer.signOnlyTransaction(tx);
-    return signer.sendTransaction(signed);
+    await tx.completeFeeChangeToOutput(
+      signer,
+      0,
+      await this.poolFeeRate(client),
+      undefined,
+      { shouldAddInputs: false },
+    );
+
+    const afterForfeitFee = tx.getWitnessArgsAt(0) ?? WitnessArgs.from({});
+    tx.setWitnessArgsAt(
+      0,
+      WitnessArgs.from({
+        lock: afterForfeitFee.lock,
+        inputType: hexFrom(forfeitBytes),
+        outputType: afterForfeitFee.outputType,
+      }),
+    );
+
+    return this.submitHouseTx(client, signer, tx);
   }
 }
 
