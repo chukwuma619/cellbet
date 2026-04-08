@@ -1,0 +1,13 @@
+{
+  "cell_recipes": [
+    {
+      "name": "crash-round",
+      "tx_hash": "0x439312980c4a26796da939a8f831e10e2e9aaa9553a8311931145f8172fa9c58",
+      "index": 0,
+      "occupied_capacity": 7331700000000,
+      "data_hash": "0x9834785c0ee42759f9b9bb950c420f173e18d76bda3a29cd0217629095ee763d",
+      "type_id": null
+    }
+  ],
+  "dep_group_recipes": []
+}

@@ -1,0 +1,9 @@
+[[cells]]
+name = "crash-round"
+enable_type_id = false
+location = { file = "../build/release/crash-round" }
+
+[lock]
+code_hash = "0x9bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce8"
+args = "0x5e41000219b8d3984bb30e7f9aa347b09d0eb25f"
+hash_type = "type"
