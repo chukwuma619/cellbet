@@ -477,6 +477,8 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       tokenSymbol: 'CKB',
     });
 
+    void this.pushPublicState();
+
     return {
       betId,
       roundId: r.dbRoundId,
@@ -484,7 +486,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async cashOut(walletAddress: string) {
+  async cashOut(walletAddress: string, requestedBetId?: string) {
     const r = this.runtime;
     if (!r || r.phase !== 'running' || !r.runningStartedAt) {
       throw new Error('Cannot cash out right now');
@@ -493,26 +495,49 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     const multStr = String(mult);
     const feeBps = this.cashoutFeeBps();
 
-    const [candidate] = await this.db
-      .select({
-        id: crashBets.id,
-        amount: crashBets.amount,
-        escrowTxHash: crashBets.escrowTxHash,
-        escrowOutputIndex: crashBets.escrowOutputIndex,
-      })
-      .from(crashBets)
-      .where(
-        and(
-          eq(crashBets.roundId, r.dbRoundId),
-          eq(crashBets.ckbAddress, walletAddress),
-          eq(crashBets.status, 'pending'),
-        ),
-      )
-      .orderBy(asc(crashBets.createdAt))
-      .limit(1);
+    const trimmedBetId = requestedBetId?.trim();
+    const [candidate] = trimmedBetId
+      ? await this.db
+          .select({
+            id: crashBets.id,
+            amount: crashBets.amount,
+            escrowTxHash: crashBets.escrowTxHash,
+            escrowOutputIndex: crashBets.escrowOutputIndex,
+          })
+          .from(crashBets)
+          .where(
+            and(
+              eq(crashBets.id, trimmedBetId),
+              eq(crashBets.roundId, r.dbRoundId),
+              eq(crashBets.ckbAddress, walletAddress),
+              eq(crashBets.status, 'pending'),
+            ),
+          )
+          .limit(1)
+      : await this.db
+          .select({
+            id: crashBets.id,
+            amount: crashBets.amount,
+            escrowTxHash: crashBets.escrowTxHash,
+            escrowOutputIndex: crashBets.escrowOutputIndex,
+          })
+          .from(crashBets)
+          .where(
+            and(
+              eq(crashBets.roundId, r.dbRoundId),
+              eq(crashBets.ckbAddress, walletAddress),
+              eq(crashBets.status, 'pending'),
+            ),
+          )
+          .orderBy(asc(crashBets.createdAt))
+          .limit(1);
 
     if (!candidate) {
-      throw new Error('No open bet for this round');
+      throw new Error(
+        trimmedBetId
+          ? 'No open bet matches that id for this round'
+          : 'No open bet for this round',
+      );
     }
     if (!candidate.escrowTxHash?.trim()) {
       throw new Error(

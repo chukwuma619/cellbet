@@ -59,11 +59,17 @@ export async function postBet(body: {
   return data;
 }
 
-export async function postCashOut(walletAddress: string): Promise<unknown> {
+export async function postCashOut(
+  walletAddress: string,
+  betId?: string,
+): Promise<unknown> {
   const res = await fetch(`${getApiBaseUrl()}/crash/cashout`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ walletAddress }),
+    body: JSON.stringify({
+      walletAddress,
+      ...(betId ? { betId } : {}),
+    }),
   });
   const data = (await res.json().catch(() => ({}))) as {
     message?: string | string[];

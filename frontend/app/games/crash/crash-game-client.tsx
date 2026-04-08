@@ -6,13 +6,18 @@ import { useCcc } from "@ckb-ccc/connector-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { CrashParticipantsTable } from "@/components/crash/crash-participants-table";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCkbAddress } from "@/hooks/use-ckb-address";
 import { useOnChainCkbBalance } from "@/hooks/use-on-chain-ckb-balance";
-import { CrashParticipantsTable } from "@/components/crash/crash-participants-table";
 import { useCrashSocket } from "@/hooks/use-crash-socket";
 import { postBet, postCashOut } from "@/lib/api";
 import { isCrashOnChainConfigured } from "@/lib/ckb/crash-config";
@@ -23,19 +28,60 @@ const MIN_ONCHAIN_STAKE_CKB = Number(
   fixedPointToString(CKB_MIN_OCCUPIED_CAPACITY_SHANNONS, 8),
 );
 
+type StakeSlot = "a" | "b";
+
 export function CrashGameClient() {
   const { round, participants } = useCrashSocket();
   const { address, isConnected, openConnector } = useCkbAddress();
   const { signerInfo } = useCcc();
   const { shannons, displayShort, refresh } = useOnChainCkbBalance(address);
   const [now, setNow] = useState(() => Date.now());
-  const [amount, setAmount] = useState("10");
-  const [submitting, setSubmitting] = useState(false);
+  const [amountA, setAmountA] = useState("10");
+  const [amountB, setAmountB] = useState("10");
+  const [betIdA, setBetIdA] = useState<string | null>(null);
+  const [betIdB, setBetIdB] = useState<string | null>(null);
+  const [busyBetA, setBusyBetA] = useState(false);
+  const [busyBetB, setBusyBetB] = useState(false);
+  const [busyCashA, setBusyCashA] = useState(false);
+  const [busyCashB, setBusyCashB] = useState(false);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 200);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    setBetIdA(null);
+    setBetIdB(null);
+  }, [round?.id]);
+
+  useEffect(() => {
+    if (!address || !round?.id) return;
+    const mine = participants
+      .filter(
+        (p) =>
+          p.ckbAddress === address &&
+          p.roundId === round.id &&
+          p.status === "pending",
+      )
+      .sort((a, b) => a.betId.localeCompare(b.betId));
+    setBetIdA((prev) => prev ?? mine[0]?.betId ?? null);
+    setBetIdB((prev) => prev ?? mine[1]?.betId ?? null);
+  }, [participants, round?.id, address]);
+
+  useEffect(() => {
+    if (betIdA) {
+      const p = participants.find((x) => x.betId === betIdA);
+      if (p && p.status !== "pending") setBetIdA(null);
+    }
+  }, [participants, betIdA]);
+
+  useEffect(() => {
+    if (betIdB) {
+      const p = participants.find((x) => x.betId === betIdB);
+      if (p && p.status !== "pending") setBetIdB(null);
+    }
+  }, [participants, betIdB]);
 
   const phase = round?.phase ?? "…";
   const mult = round?.currentMultiplier ?? 1;
@@ -46,7 +92,14 @@ export function CrashGameClient() {
 
   const ckbGameConfigured = isCrashOnChainConfigured();
 
-  async function onBet() {
+  function balanceOkFor(amountStr: string) {
+    return (
+      shannons === null ||
+      fixedPointFrom(amountStr.trim() || "0", 8) <= shannons
+    );
+  }
+
+  async function onBet(slot: StakeSlot) {
     if (!address) {
       openConnector();
       return;
@@ -57,7 +110,14 @@ export function CrashGameClient() {
       );
       return;
     }
-    const n = Number(amount);
+    const amountStr = slot === "a" ? amountA : amountB;
+    const setBusy = slot === "a" ? setBusyBetA : setBusyBetB;
+    const existingId = slot === "a" ? betIdA : betIdB;
+    if (existingId) {
+      toast.error("This stake already has a bet for this round.");
+      return;
+    }
+    const n = Number(amountStr);
     if (!Number.isFinite(n) || n <= 0) {
       toast.error("Enter a valid amount");
       return;
@@ -70,12 +130,12 @@ export function CrashGameClient() {
     }
     if (
       shannons !== null &&
-      fixedPointFrom(amount.trim() || "0", 8) > shannons
+      fixedPointFrom(amountStr.trim() || "0", 8) > shannons
     ) {
       toast.error("Insufficient on-chain CKB balance");
       return;
     }
-    setSubmitting(true);
+    setBusy(true);
     try {
       const signer = signerInfo?.signer;
       if (!signer) {
@@ -88,19 +148,24 @@ export function CrashGameClient() {
         toast.error("Round data not ready — wait for the next betting window.");
         return;
       }
-      const stakeShannons = fixedPointFrom(amount.trim() || "0", 8);
+      const stakeShannons = fixedPointFrom(amountStr.trim() || "0", 8);
       const escrowTxHash = await buildPlaceBetTx({
         signer,
         roundId: BigInt(chainRoundId),
         stakeShannons,
         serverSeedHashHex: seedHash,
       });
-      await postBet({
+      const raw = await postBet({
         walletAddress: address,
         amount: n,
         escrowTxHash,
         escrowOutputIndex: 0,
       });
+      const placed = raw as { betId?: string };
+      if (typeof placed.betId === "string" && placed.betId.length > 0) {
+        if (slot === "a") setBetIdA(placed.betId);
+        else setBetIdB(placed.betId);
+      }
       await refresh();
       toast.success("Bet placed");
     } catch (e) {
@@ -110,56 +175,75 @@ export function CrashGameClient() {
         toast.error(e instanceof Error ? e.message : "Bet failed");
       }
     } finally {
-      setSubmitting(false);
+      setBusy(false);
     }
   }
 
-  async function onCashOut() {
+  async function onCashOut(slot: StakeSlot) {
     if (!address) return;
-    setSubmitting(true);
+    const id = slot === "a" ? betIdA : betIdB;
+    if (!id) return;
+    const setBusy = slot === "a" ? setBusyCashA : setBusyCashB;
+    setBusy(true);
     try {
-      await postCashOut(address);
+      await postCashOut(address, id);
       await refresh();
+      if (slot === "a") setBetIdA(null);
+      else setBetIdB(null);
       toast.success("Cashed out");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Cash out failed");
     } finally {
-      setSubmitting(false);
+      setBusy(false);
     }
   }
 
-  const balanceOk =
-    shannons === null ||
-    fixedPointFrom(amount.trim() || "0", 8) <= shannons;
   const chainRoundReady = Boolean(
     round?.chainRoundId && round.chainRoundId.length > 0,
   );
   const commitReady = round?.commitAnchored === true;
-  const canBet =
+
+  const baseCanBet =
     isConnected &&
     ckbGameConfigured &&
     phase === "betting" &&
     bettingLeftSec > 0 &&
-    balanceOk &&
     chainRoundReady &&
     commitReady;
-  const canCashOut =
-    isConnected && phase === "running" && mult > 0 && !submitting;
 
+  const canBetA =
+    baseCanBet && balanceOkFor(amountA) && !betIdA && !busyBetA;
+  const canBetB =
+    baseCanBet && balanceOkFor(amountB) && !betIdB && !busyBetB;
 
-  const betButtonLabel = canBet
-    ? "Bet"
-    : phase !== "betting"
-      ? "Wait"
-      : shannons !== null && !balanceOk
-        ? "Insufficient balance"
-        : !ckbGameConfigured
-          ? "Configure CKB env"
-          : !chainRoundReady
-            ? "Syncing round…"
-            : !commitReady
-              ? "Anchoring…"
-              : "Betting closed";
+  const canCashOutA =
+    isConnected &&
+    phase === "running" &&
+    mult > 0 &&
+    Boolean(betIdA) &&
+    !busyCashA;
+  const canCashOutB =
+    isConnected &&
+    phase === "running" &&
+    mult > 0 &&
+    Boolean(betIdB) &&
+    !busyCashB;
+
+  function betButtonLabelFor(amountStr: string) {
+    return baseCanBet
+      ? "Bet"
+      : phase !== "betting"
+        ? "Wait"
+        : shannons !== null && !balanceOkFor(amountStr)
+          ? "Insufficient balance"
+          : !ckbGameConfigured
+            ? "Configure CKB env"
+            : !chainRoundReady
+              ? "Syncing round…"
+              : !commitReady
+                ? "Anchoring…"
+                : "Betting closed";
+  }
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
@@ -205,6 +289,9 @@ export function CrashGameClient() {
 
         <div className="grid grid-cols-1  md:grid-cols-2 gap-2">
           <Card>
+            <CardHeader className="pb-0">
+              <CardTitle className="text-base">Stake 1</CardTitle>
+            </CardHeader>
             <CardContent className="space-y-4">
               {!isConnected && (
                 <p className="text-muted-foreground text-sm">
@@ -213,19 +300,19 @@ export function CrashGameClient() {
               )}
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
-                  <Label htmlFor="stake-a">Stake (CKB)</Label>
+                  <Label htmlFor="stake-a">Amount (CKB)</Label>
                   {displayShort !== null && (
                     <span className="text-muted-foreground font-mono text-xs tabular-nums">
                       {displayShort}
                     </span>
                   )}
                 </div>
-              
+
                 <Input
                   id="stake-a"
                   inputMode="decimal"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
+                  value={amountA}
+                  onChange={(e) => setAmountA(e.target.value)}
                   disabled={
                     !isConnected || phase !== "betting" || bettingLeftSec <= 0
                   }
@@ -235,16 +322,16 @@ export function CrashGameClient() {
               <div className="flex flex-col gap-2">
                 <Button
                   className="w-full"
-                  disabled={!canBet || submitting}
-                  onClick={() => void onBet()}
+                  disabled={!canBetA || busyBetA}
+                  onClick={() => void onBet("a")}
                 >
-                  {betButtonLabel}
+                  {betButtonLabelFor(amountA)}
                 </Button>
                 <Button
                   variant="secondary"
                   className="w-full"
-                  disabled={!canCashOut}
-                  onClick={() => void onCashOut()}
+                  disabled={!canCashOutA || busyCashA}
+                  onClick={() => void onCashOut("a")}
                 >
                   Cash out
                 </Button>
@@ -253,6 +340,9 @@ export function CrashGameClient() {
           </Card>
 
           <Card>
+            <CardHeader className="pb-0">
+              <CardTitle className="text-base">Stake 2</CardTitle>
+            </CardHeader>
             <CardContent className="space-y-4">
               {!isConnected && (
                 <p className="text-muted-foreground text-sm">
@@ -261,19 +351,19 @@ export function CrashGameClient() {
               )}
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
-                  <Label htmlFor="stake-b">Stake (CKB)</Label>
+                  <Label htmlFor="stake-b">Amount (CKB)</Label>
                   {displayShort !== null && (
                     <span className="text-muted-foreground font-mono text-xs tabular-nums">
                       {displayShort}
                     </span>
                   )}
                 </div>
-               
+
                 <Input
                   id="stake-b"
                   inputMode="decimal"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
+                  value={amountB}
+                  onChange={(e) => setAmountB(e.target.value)}
                   disabled={
                     !isConnected || phase !== "betting" || bettingLeftSec <= 0
                   }
@@ -283,16 +373,16 @@ export function CrashGameClient() {
               <div className="flex flex-col gap-2">
                 <Button
                   className="w-full"
-                  disabled={!canBet || submitting}
-                  onClick={() => void onBet()}
+                  disabled={!canBetB || busyBetB}
+                  onClick={() => void onBet("b")}
                 >
-                  {betButtonLabel}
+                  {betButtonLabelFor(amountB)}
                 </Button>
                 <Button
                   variant="secondary"
                   className="w-full"
-                  disabled={!canCashOut}
-                  onClick={() => void onCashOut()}
+                  disabled={!canCashOutB || busyCashB}
+                  onClick={() => void onCashOut("b")}
                 >
                   Cash out
                 </Button>
@@ -300,15 +390,11 @@ export function CrashGameClient() {
             </CardContent>
           </Card>
         </div>
-        <p className="text-muted-foreground text-center text-xs">
-          On settlement, a 3% platform fee is taken from the gross cash-out (stake × multiplier)
-          before you receive winnings; losses send the full stake to the house with no fee.
-        </p>
       </div>
 
       <div className="col-span-1 order-2 md:order-1">
-        <Card className="border-border/80">
-          <CardContent className="pt-6">
+        <Card className="border-border/80 h-full">
+          <CardContent className="pt-6 h-full">
             <CrashParticipantsTable participants={participants} />
           </CardContent>
         </Card>

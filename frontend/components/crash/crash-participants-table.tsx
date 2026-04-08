@@ -19,7 +19,7 @@ function addressHue(address: string): number {
   return h % 360;
 }
 
-function PlayerAvatar({ address }: { address: string }) {
+function WalletAvatar({ address }: { address: string }) {
   const hue = addressHue(address);
   const hue2 = (hue + 40) % 360;
   return (
@@ -61,27 +61,34 @@ type Props = {
   className?: string;
 };
 
+/** One row per stake in the current round (same wallet can appear on multiple rows). */
 export function CrashParticipantsTable({ participants, className }: Props) {
   return (
-    <div className={cn("space-y-2", className)}>
-     
+    <div className={cn("space-y-3 h-full", className)}>
+      <div>
+        <p className="text-foreground text-sm font-medium">This round</p>
+        <p className="text-muted-foreground mt-0.5 text-xs leading-snug">
+          One row per stake (two stakes from the same wallet are two rows).
+        </p>
+      </div>
+
       <Table
-        className="border-0 text-sm [&_td]:border-0 [&_th]:border-0"
+        className="border-0 text-sm [&_td]:border-0 h-full [&_th]:border-0"
         data-slot="crash-participants-table"
       >
         <TableHeader className="[&_tr]:border-0">
           <TableRow className="border-0 hover:bg-transparent">
             <TableHead className="h-9 px-2 text-xs font-medium text-muted-foreground">
-              Player
+              Wallet
             </TableHead>
             <TableHead className="h-9 px-2 text-xs font-medium text-muted-foreground">
-              Bet
+              Stake
             </TableHead>
             <TableHead className="h-9 px-2 text-right text-xs font-medium text-muted-foreground">
-              X
+              Cashout ×
             </TableHead>
             <TableHead className="h-9 px-2 text-right text-xs font-medium text-muted-foreground">
-              Win
+              Payout
             </TableHead>
           </TableRow>
         </TableHeader>
@@ -92,7 +99,7 @@ export function CrashParticipantsTable({ participants, className }: Props) {
                 colSpan={4}
                 className="text-muted-foreground py-6 text-center text-xs"
               >
-                No bets yet this round.
+                No stakes yet this round.
               </TableCell>
             </TableRow>
           ) : (
@@ -104,7 +111,7 @@ export function CrashParticipantsTable({ participants, className }: Props) {
                 <TableRow key={p.betId} className="border-0 hover:bg-muted/40">
                   <TableCell className="px-2 py-2">
                     <div className="flex min-w-0 items-center gap-2">
-                      <PlayerAvatar address={p.ckbAddress} />
+                      <WalletAvatar address={p.ckbAddress} />
                       <span className="font-mono text-xs truncate">
                         {truncateCkbAddress(p.ckbAddress)}
                       </span>
@@ -114,12 +121,10 @@ export function CrashParticipantsTable({ participants, className }: Props) {
                     {formatStake(p.amount, p.tokenSymbol)}
                   </TableCell>
                   <TableCell className="px-2 py-2 text-right font-mono text-xs tabular-nums">
-                    {showCashout ? `${p.cashedOutAtMultiplier!.toFixed(2)}×` : ""}
+                    {showCashout ? `${p.cashedOutAtMultiplier!.toFixed(2)}×` : "—"}
                   </TableCell>
                   <TableCell className="px-2 py-2 text-right font-mono text-xs tabular-nums">
-                    {showCashout
-                      ? formatWin(p.winAmount, p.tokenSymbol)
-                      : ""}
+                    {showCashout ? formatWin(p.winAmount, p.tokenSymbol) : "—"}
                   </TableCell>
                 </TableRow>
               );

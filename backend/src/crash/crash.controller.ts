@@ -77,7 +77,10 @@ export class CrashController {
   @Post('cashout')
   async cashOut(@Body() body: CashOutDto) {
     try {
-      return await this.crashService.cashOut(body.walletAddress);
+      return await this.crashService.cashOut(
+        body.walletAddress,
+        body.betId?.trim() || undefined,
+      );
     } catch (e) {
       throw new BadRequestException(
         e instanceof Error ? e.message : 'Could not cash out',
