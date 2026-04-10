@@ -15,6 +15,7 @@ import { and, asc, desc, eq, or, sql } from 'drizzle-orm';
 import { CKB_MIN_OCCUPIED_CAPACITY_SHANNONS } from '@cellbet/shared';
 import {
   crashBets,
+  crashGameSessions,
   crashRounds,
   type NeonDrizzle,
   walletAccounts,
@@ -387,7 +388,7 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     clientSeed?: string,
     escrowTxHash?: string,
     escrowOutputIndex?: number,
-    funding: 'escrow' | 'balance' = 'escrow',
+    funding: 'escrow' | 'balance' | 'session' = 'escrow',
   ) {
     const r = this.runtime;
     if (!r || r.phase !== 'betting' || Date.now() >= r.bettingEndsAt) {
@@ -484,6 +485,122 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
         roundId: r.dbRoundId,
         amount: amountStr,
         funding: 'balance',
+      };
+    }
+
+    if (funding === 'session') {
+      if (!this.config.get<string>('GAME_SESSION_BACKEND_PRIVATE_KEY')?.trim()) {
+        throw new Error('Session (Pattern A) bets are not configured on the server');
+      }
+      const [sess] = await this.db
+        .select({
+          sessionTxHash: crashGameSessions.sessionTxHash,
+          sessionOutputIndex: crashGameSessions.sessionOutputIndex,
+        })
+        .from(crashGameSessions)
+        .where(eq(crashGameSessions.ckbAddress, walletAddress))
+        .limit(1);
+      if (!sess?.sessionTxHash?.trim()) {
+        throw new Error(
+          'No registered game session. Fund a session cell, broadcast it, then POST /crash/session/register.',
+        );
+      }
+
+      const submitted = await this.onchain.submitSessionFundedBet({
+        sessionTxHash: sess.sessionTxHash.trim(),
+        sessionOutputIndex: sess.sessionOutputIndex,
+        userCkbAddress: walletAddress,
+        chainRoundId: r.chainRoundId,
+        serverSeedHashHex: r.serverSeedHash,
+        stakeShannons: newShannons,
+        feeBps,
+      });
+
+      const hNorm = submitted.txHash.startsWith('0x')
+        ? submitted.txHash
+        : (`0x${submitted.txHash}` as `0x${string}`);
+      const outIdx = submitted.escrowOutputIndex;
+
+      const [dupBet] = await this.db
+        .select({ id: crashBets.id })
+        .from(crashBets)
+        .where(
+          and(
+            eq(crashBets.roundId, r.dbRoundId),
+            eq(crashBets.escrowTxHash, hNorm),
+            eq(crashBets.escrowOutputIndex, outIdx),
+          ),
+        )
+        .limit(1);
+      if (dupBet) {
+        throw new Error(
+          'This escrow output is already registered for a bet in this round.',
+        );
+      }
+
+      await this.onchain.verifyUserEscrowCell({
+        escrowTxHash: hNorm,
+        escrowOutputIndex: outIdx,
+        userCkbAddress: walletAddress,
+        chainRoundId: r.chainRoundId,
+        serverSeedHashHex: r.serverSeedHash,
+        stakeShannons: newShannons,
+        feeBps,
+      });
+
+      const newSessTx = submitted.newSessionTxHash.startsWith('0x')
+        ? submitted.newSessionTxHash
+        : (`0x${submitted.newSessionTxHash}` as `0x${string}`);
+
+      await this.db
+        .update(crashGameSessions)
+        .set({
+          sessionTxHash: newSessTx,
+          sessionOutputIndex: submitted.newSessionOutputIndex,
+          updatedAt: new Date(),
+        })
+        .where(eq(crashGameSessions.ckbAddress, walletAddress));
+
+      await this.db
+        .insert(walletAccounts)
+        .values({
+          ckbAddress: walletAddress,
+          username: walletAddress,
+        })
+        .onConflictDoNothing();
+
+      const [bet] = await this.db
+        .insert(crashBets)
+        .values({
+          roundId: r.dbRoundId,
+          ckbAddress: walletAddress,
+          clientSeed: seed,
+          amount: amountStr,
+          status: 'pending',
+          escrowTxHash: hNorm,
+          escrowOutputIndex: outIdx,
+          fundingSource: 'session',
+        })
+        .returning();
+
+      if (!bet) {
+        throw new Error('Could not place bet');
+      }
+
+      const betId = String(bet.id);
+      this.gateway.emitBetPlaced({
+        betId,
+        roundId: r.dbRoundId,
+        ckbAddress: walletAddress,
+        amount: amountStr,
+        tokenSymbol: 'CKB',
+      });
+      void this.pushPublicState();
+      return {
+        betId,
+        roundId: r.dbRoundId,
+        amount: amountStr,
+        funding: 'session',
       };
     }
 
@@ -1117,5 +1234,68 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
         this.logger.error('Failed to start next crash round', err),
       );
     }, SETTLE_PAUSE_MS);
+  }
+
+  async registerGameSession(
+    walletAddress: string,
+    txHash: string,
+    outputIndex: number,
+  ): Promise<{ ok: true }> {
+    await this.onchain.validateSessionRegistration({
+      sessionTxHash: txHash,
+      sessionOutputIndex: outputIndex,
+      userCkbAddress: walletAddress,
+    });
+    const trimmed = txHash.trim();
+    const hNorm = trimmed.startsWith('0x') ? trimmed : `0x${trimmed}`;
+    await this.db
+      .insert(crashGameSessions)
+      .values({
+        ckbAddress: walletAddress,
+        sessionTxHash: hNorm,
+        sessionOutputIndex: outputIndex,
+      })
+      .onConflictDoUpdate({
+        target: crashGameSessions.ckbAddress,
+        set: {
+          sessionTxHash: hNorm,
+          sessionOutputIndex: outputIndex,
+          updatedAt: new Date(),
+        },
+      });
+    return { ok: true };
+  }
+
+  getPatternASessionConfig() {
+    return this.onchain.getPatternASessionPublicConfig();
+  }
+
+  async getGameSession(walletAddress: string): Promise<
+    | { active: false }
+    | {
+        active: true;
+        sessionTxHash: string;
+        sessionOutputIndex: number;
+        updatedAt: string;
+      }
+  > {
+    const [row] = await this.db
+      .select({
+        sessionTxHash: crashGameSessions.sessionTxHash,
+        sessionOutputIndex: crashGameSessions.sessionOutputIndex,
+        updatedAt: crashGameSessions.updatedAt,
+      })
+      .from(crashGameSessions)
+      .where(eq(crashGameSessions.ckbAddress, walletAddress))
+      .limit(1);
+    if (!row) {
+      return { active: false };
+    }
+    return {
+      active: true,
+      sessionTxHash: row.sessionTxHash,
+      sessionOutputIndex: row.sessionOutputIndex,
+      updatedAt: row.updatedAt.toISOString(),
+    };
   }
 }

@@ -11,6 +11,7 @@ members = [
 # Standalone no_std crates built via contracts/*/Makefile (riscv64imac).
 exclude = [
   "contracts/crash-round",
+  "contracts/game-session-lock",
 ]
 
 [profile.release]

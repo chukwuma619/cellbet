@@ -63,11 +63,77 @@ export async function fetchCrashRoundProof(roundId: string): Promise<unknown> {
   return res.json();
 }
 
+export type PatternASessionPublicConfig = {
+  backendLockArgsHex: string;
+  gameSessionLockCodeHash: string;
+  gameSessionLockHashType: string;
+  gameSessionLockCellDep: {
+    txHash: string;
+    index: number;
+    depType: string;
+  };
+  crashTypeScriptCodeHash: string;
+  crashTypeScriptHashType: string;
+} | null;
+
+export async function fetchPatternASessionConfig(): Promise<PatternASessionPublicConfig> {
+  const res = await fetch(`${getApiBaseUrl()}/crash/session/config`, {
+    cache: "no-store",
+  });
+  if (!res.ok) return null;
+  return res.json() as Promise<PatternASessionPublicConfig>;
+}
+
+export type GameSessionStatus =
+  | { active: false }
+  | {
+      active: true;
+      sessionTxHash: string;
+      sessionOutputIndex: number;
+      updatedAt: string;
+    };
+
+export async function fetchGameSessionStatus(
+  walletAddress: string,
+): Promise<GameSessionStatus> {
+  const params = new URLSearchParams({ walletAddress });
+  const res = await fetch(
+    `${getApiBaseUrl()}/crash/session?${params}`,
+    { cache: "no-store" },
+  );
+  if (!res.ok) {
+    return { active: false };
+  }
+  return res.json() as Promise<GameSessionStatus>;
+}
+
+export async function postRegisterGameSession(body: {
+  walletAddress: string;
+  txHash: string;
+  outputIndex: number;
+}): Promise<{ ok: true }> {
+  const res = await fetch(`${getApiBaseUrl()}/crash/session/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string | string[];
+  };
+  if (!res.ok) {
+    const msg = Array.isArray(data?.message)
+      ? data.message.join(", ")
+      : data?.message;
+    throw new Error(msg || "Could not register game session");
+  }
+  return data as { ok: true };
+}
+
 export async function postBet(body: {
   walletAddress: string;
   amount: number;
   clientSeed?: string;
-  funding?: "escrow" | "balance";
+  funding?: "escrow" | "balance" | "session";
   escrowTxHash?: string;
   escrowOutputIndex?: number;
 }): Promise<unknown> {

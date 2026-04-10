@@ -1,0 +1,1 @@
+/Users/ebube/Desktop/Personal/cellbet/contract/contracts/game-session-lock//target/riscv64imac-unknown-none-elf/release/game-session-lock: /Users/ebube/Desktop/Personal/cellbet/contract/contracts/game-session-lock/src/main.rs

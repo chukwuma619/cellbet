@@ -1,0 +1,70 @@
+cargo:rerun-if-changed=c/dlopen.c
+cargo:rerun-if-changed=c/libc.c
+Apple clang version 21.0.0 (clang-2100.0.123.102)
+Target: arm64-apple-darwin25.2.0
+Thread model: posix
+InstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin
+
+cargo:rerun-if-env-changed=CC_riscv64imac-unknown-none-elf
+CC_riscv64imac-unknown-none-elf = None
+cargo:rerun-if-env-changed=CC_riscv64imac_unknown_none_elf
+CC_riscv64imac_unknown_none_elf = None
+cargo:rerun-if-env-changed=TARGET_CC
+TARGET_CC = Some(/opt/homebrew/opt/llvm@18/bin/clang)
+cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+CRATE_CC_NO_DEFAULTS = None
+cargo:rerun-if-env-changed=CFLAGS
+CFLAGS = None
+cargo:rerun-if-env-changed=TARGET_CFLAGS
+TARGET_CFLAGS = None
+cargo:rerun-if-env-changed=CFLAGS_riscv64imac_unknown_none_elf
+CFLAGS_riscv64imac_unknown_none_elf = None
+cargo:rerun-if-env-changed=CFLAGS_riscv64imac-unknown-none-elf
+CFLAGS_riscv64imac-unknown-none-elf = None
+cargo:rerun-if-env-changed=CC_FORCE_DISABLE
+CC_FORCE_DISABLE = None
+cargo:rerun-if-env-changed=CC_riscv64imac-unknown-none-elf
+CC_riscv64imac-unknown-none-elf = None
+cargo:rerun-if-env-changed=CC_riscv64imac_unknown_none_elf
+CC_riscv64imac_unknown_none_elf = None
+cargo:rerun-if-env-changed=TARGET_CC
+TARGET_CC = Some(/opt/homebrew/opt/llvm@18/bin/clang)
+cargo:rerun-if-env-changed=CFLAGS
+CFLAGS = None
+cargo:rerun-if-env-changed=TARGET_CFLAGS
+TARGET_CFLAGS = None
+cargo:rerun-if-env-changed=CFLAGS_riscv64imac_unknown_none_elf
+CFLAGS_riscv64imac_unknown_none_elf = None
+cargo:rerun-if-env-changed=CFLAGS_riscv64imac-unknown-none-elf
+CFLAGS_riscv64imac-unknown-none-elf = None
+cargo:rerun-if-env-changed=AR_riscv64imac-unknown-none-elf
+AR_riscv64imac-unknown-none-elf = None
+cargo:rerun-if-env-changed=AR_riscv64imac_unknown_none_elf
+AR_riscv64imac_unknown_none_elf = None
+cargo:rerun-if-env-changed=TARGET_AR
+TARGET_AR = Some(/opt/homebrew/opt/llvm@18/bin/llvm-ar)
+cargo:rerun-if-env-changed=ARFLAGS
+ARFLAGS = None
+cargo:rerun-if-env-changed=TARGET_ARFLAGS
+TARGET_ARFLAGS = None
+cargo:rerun-if-env-changed=ARFLAGS_riscv64imac_unknown_none_elf
+ARFLAGS_riscv64imac_unknown_none_elf = None
+cargo:rerun-if-env-changed=ARFLAGS_riscv64imac-unknown-none-elf
+ARFLAGS_riscv64imac-unknown-none-elf = None
+cargo:rerun-if-env-changed=AR_riscv64imac-unknown-none-elf
+AR_riscv64imac-unknown-none-elf = None
+cargo:rerun-if-env-changed=AR_riscv64imac_unknown_none_elf
+AR_riscv64imac_unknown_none_elf = None
+cargo:rerun-if-env-changed=TARGET_AR
+TARGET_AR = Some(/opt/homebrew/opt/llvm@18/bin/llvm-ar)
+cargo:rerun-if-env-changed=ARFLAGS
+ARFLAGS = None
+cargo:rerun-if-env-changed=TARGET_ARFLAGS
+TARGET_ARFLAGS = None
+cargo:rerun-if-env-changed=ARFLAGS_riscv64imac_unknown_none_elf
+ARFLAGS_riscv64imac_unknown_none_elf = None
+cargo:rerun-if-env-changed=ARFLAGS_riscv64imac-unknown-none-elf
+ARFLAGS_riscv64imac-unknown-none-elf = None
+cargo:rustc-link-lib=static=libc
+cargo:rustc-link-search=native=/Users/ebube/Desktop/Personal/cellbet/contract/contracts/game-session-lock//target/riscv64imac-unknown-none-elf/release/build/ckb-std-6916a374f9675cee/out

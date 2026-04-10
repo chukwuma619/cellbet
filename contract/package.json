@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build:scripts": "make -C contracts/crash-round build",
+    "build:scripts": "make -C contracts/crash-round build && make -C contracts/game-session-lock build",
     "build": "npm run build:scripts && cargo build --release",
     "test": "npm run build:scripts && cargo test",
     "check": "cargo check",

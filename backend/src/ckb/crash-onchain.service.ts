@@ -14,6 +14,7 @@ import {
   CKB_MIN_OCCUPIED_CAPACITY_SHANNONS,
   decodeCrashCommitCellDataV1,
   encodeCrashCommitCellDataV1,
+  encodeCrashEscrowCellDataV2,
   hex32ToBytes,
   sha256BytesUtf8,
 } from '@cellbet/shared';
@@ -665,6 +666,385 @@ export class CrashOnchainService {
         restoreWitnessInputTypeAt(prepared, 0, forfeitBytes);
       },
     });
+  }
+
+  /** Public values for clients building `game-session-lock` deposit cells. */
+  async getPatternASessionPublicConfig(): Promise<{
+    backendLockArgsHex: string;
+    gameSessionLockCodeHash: string;
+    gameSessionLockHashType: string;
+    gameSessionLockCellDep: {
+      txHash: string;
+      index: number;
+      depType: string;
+    };
+    crashTypeScriptCodeHash: string;
+    crashTypeScriptHashType: string;
+  } | null> {
+    const sessionSigner = this.sessionBackendSignerOrNull();
+    if (!sessionSigner) {
+      return null;
+    }
+    try {
+      const tpl = this.gameSessionLockCodeTemplate();
+      const typeScript = this.crashTypeScript();
+      const txHash = this.config
+        .get<string>('GAME_SESSION_LOCK_SCRIPT_CELL_DEP_TX_HASH')
+        ?.trim();
+      const indexRaw = this.config.get<string>(
+        'GAME_SESSION_LOCK_SCRIPT_CELL_DEP_INDEX',
+      );
+      if (!txHash || indexRaw === undefined || indexRaw === '') {
+        return null;
+      }
+      const depType = (
+        this.config.get<string>('GAME_SESSION_LOCK_SCRIPT_CELL_DEP_TYPE') ??
+        'code'
+      ).trim();
+      const backendAddr =
+        await sessionSigner.getRecommendedAddressObj();
+      return {
+        backendLockArgsHex: hexFrom(backendAddr.script.args),
+        gameSessionLockCodeHash: hexFrom(tpl.codeHash),
+        gameSessionLockHashType: String(tpl.hashType),
+        gameSessionLockCellDep: {
+          txHash,
+          index: Number.parseInt(indexRaw, 10),
+          depType,
+        },
+        crashTypeScriptCodeHash: hexFrom(typeScript.codeHash),
+        crashTypeScriptHashType: String(typeScript.hashType),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private sessionBackendSignerOrNull(): SignerCkbPrivateKey | null {
+    const pk = this.config
+      .get<string>('GAME_SESSION_BACKEND_PRIVATE_KEY')
+      ?.trim();
+    if (!pk) {
+      return null;
+    }
+    return new SignerCkbPrivateKey(this.ckbRpc.getCccClient(), pk);
+  }
+
+  private gameSessionLockCodeTemplate(): Script {
+    const codeHash = this.config
+      .get<string>('GAME_SESSION_LOCK_CODE_HASH')
+      ?.trim();
+    const hashType = (
+      this.config.get<string>('GAME_SESSION_LOCK_HASH_TYPE') ?? 'data1'
+    ).trim();
+    if (!codeHash) {
+      throw new Error('GAME_SESSION_LOCK_CODE_HASH is not set');
+    }
+    return Script.from({
+      codeHash: codeHash as `0x${string}`,
+      hashType: hashType as 'data1' | 'data2' | 'type',
+      args: '0x',
+    });
+  }
+
+  private async gameSessionCellDeps(
+    client: ReturnType<CkbRpcService['getCccClient']>,
+  ): Promise<CellDep[]> {
+    const txHash = this.config
+      .get<string>('GAME_SESSION_LOCK_SCRIPT_CELL_DEP_TX_HASH')
+      ?.trim();
+    const indexRaw = this.config.get<string>(
+      'GAME_SESSION_LOCK_SCRIPT_CELL_DEP_INDEX',
+    );
+    if (!txHash || indexRaw === undefined || indexRaw === '') {
+      throw new Error(
+        'GAME_SESSION_LOCK_SCRIPT_CELL_DEP_TX_HASH / GAME_SESSION_LOCK_SCRIPT_CELL_DEP_INDEX are not set',
+      );
+    }
+    const index = Number.parseInt(indexRaw, 10);
+    const depType = (
+      this.config.get<string>('GAME_SESSION_LOCK_SCRIPT_CELL_DEP_TYPE') ??
+      'code'
+    ).trim();
+    return [
+      CellDep.from({
+        outPoint: { txHash: txHash as `0x${string}`, index },
+        depType: depType as 'code' | 'depGroup',
+      }),
+    ];
+  }
+
+  /**
+   * Validates a live game-wallet cell for `walletAddress` (lock args + backend pubkey).
+   */
+  async validateSessionRegistration(params: {
+    sessionTxHash: string;
+    sessionOutputIndex: number;
+    userCkbAddress: string;
+  }): Promise<void> {
+    const sessionSigner = this.sessionBackendSignerOrNull();
+    if (!sessionSigner) {
+      throw new Error('GAME_SESSION_BACKEND_PRIVATE_KEY is not configured');
+    }
+    await this.fetchVerifiedSessionCellContext({
+      ...params,
+      sessionSigner,
+    });
+  }
+
+  private async fetchVerifiedSessionCellContext(params: {
+    sessionTxHash: string;
+    sessionOutputIndex: number;
+    userCkbAddress: string;
+    sessionSigner: SignerCkbPrivateKey;
+  }): Promise<{
+    client: ReturnType<CkbRpcService['getCccClient']>;
+    sessionLock: Script;
+    capIn: bigint;
+  }> {
+    const client = this.ckbRpc.getCccClient();
+    await this.clearCccClientCellAndTxCache(client);
+
+    const outPoint = {
+      txHash: normalizeTxHash(params.sessionTxHash),
+      index: params.sessionOutputIndex,
+    };
+    const live =
+      (await client.getCellLive(outPoint, true, true)) ??
+      (await client.getCellLiveNoCache(outPoint, true, true));
+    if (!live) {
+      throw new Error(
+        'Game session cell is not live (confirm the transaction or wait for indexer)',
+      );
+    }
+
+    const sessionLock = Script.from(live.cellOutput.lock);
+    const codeTpl = this.gameSessionLockCodeTemplate();
+    if (hexFrom(sessionLock.codeHash) !== hexFrom(codeTpl.codeHash)) {
+      throw new Error(
+        'Session cell lock code_hash does not match GAME_SESSION_LOCK_CODE_HASH',
+      );
+    }
+    if (sessionLock.hashType !== codeTpl.hashType) {
+      throw new Error(
+        'Session cell lock hash_type does not match GAME_SESSION_LOCK_HASH_TYPE',
+      );
+    }
+
+    const argsBytes = hexOutputDataToBytes(hexFrom(sessionLock.args));
+    if (argsBytes.length !== 106 || argsBytes[0] !== 1) {
+      throw new Error('Invalid game-session-lock args');
+    }
+
+    const userAddrObj = await Address.fromString(params.userCkbAddress, client);
+    const userArgsBytes = hexOutputDataToBytes(hexFrom(userAddrObj.script.args));
+    if (userArgsBytes.length < 20) {
+      throw new Error(
+        'Wallet lock args are too short for game session verification',
+      );
+    }
+    const userBlakeOnCell = argsBytes.slice(1, 21);
+    if (!buffersEqual(userArgsBytes.subarray(0, 20), userBlakeOnCell)) {
+      throw new Error('Session cell user identity does not match wallet');
+    }
+
+    const backendAddr = await params.sessionSigner.getRecommendedAddressObj();
+    const backendArgsBytes = hexOutputDataToBytes(
+      hexFrom(backendAddr.script.args),
+    );
+    const backendOnCell = argsBytes.slice(21, 41);
+    if (!buffersEqual(backendArgsBytes.subarray(0, 20), backendOnCell)) {
+      throw new Error(
+        'Session cell backend identity does not match GAME_SESSION_BACKEND_PRIVATE_KEY',
+      );
+    }
+
+    const houseAddr = await this.houseSignerOrNull()?.getRecommendedAddressObj();
+    if (!houseAddr) {
+      throw new Error('HOUSE_CKB_PRIVATE_KEY is not configured');
+    }
+    const houseHash = hex32ToBytes(Script.from(houseAddr.script).hash());
+    const typeScript = this.crashTypeScript();
+    const typeCodeHashBytes = hex32ToBytes(hexFrom(typeScript.codeHash));
+
+    if (!buffersEqual(houseHash, argsBytes.slice(41, 73))) {
+      throw new Error('Session cell house lock hash mismatch');
+    }
+    if (!buffersEqual(typeCodeHashBytes, argsBytes.slice(73, 105))) {
+      throw new Error('Session cell crash type code hash mismatch');
+    }
+
+    const typeHashByteExpected: number =
+      typeScript.hashType === 'type'
+        ? 1
+        : typeScript.hashType === 'data1'
+          ? 2
+          : typeScript.hashType === 'data2'
+            ? 4
+            : 0;
+    if (argsBytes[105] !== typeHashByteExpected) {
+      throw new Error('Session cell type hash_type byte mismatch');
+    }
+
+    const capIn = BigInt(live.cellOutput.capacity.toString());
+    return { client, sessionLock, capIn };
+  }
+
+  /**
+   * Pattern A: spend user's game-session cell into crash escrow + session change;
+   * witness uses backend key (0x01 || 65-byte recoverable secp sig).
+   */
+  async submitSessionFundedBet(params: {
+    sessionTxHash: string;
+    sessionOutputIndex: number;
+    userCkbAddress: string;
+    chainRoundId: bigint;
+    serverSeedHashHex: string;
+    stakeShannons: bigint;
+    feeBps: number;
+  }): Promise<{
+    txHash: `0x${string}`;
+    escrowOutputIndex: number;
+    newSessionTxHash: `0x${string}`;
+    newSessionOutputIndex: number;
+  }> {
+    const sessionSigner = this.sessionBackendSignerOrNull();
+    const houseSigner = this.houseSignerOrNull();
+    if (!sessionSigner) {
+      throw new Error(
+        'GAME_SESSION_BACKEND_PRIVATE_KEY is not configured for Pattern A session bets',
+      );
+    }
+    if (!houseSigner) {
+      throw new Error('HOUSE_CKB_PRIVATE_KEY is not configured');
+    }
+
+    const { client, sessionLock, capIn } =
+      await this.fetchVerifiedSessionCellContext({
+        sessionTxHash: params.sessionTxHash,
+        sessionOutputIndex: params.sessionOutputIndex,
+        userCkbAddress: params.userCkbAddress,
+        sessionSigner,
+      });
+
+    const outPoint = {
+      txHash: normalizeTxHash(params.sessionTxHash),
+      index: params.sessionOutputIndex,
+    };
+
+    const houseAddr = await houseSigner.getRecommendedAddressObj();
+    const platformStr =
+      this.config.get<string>('PLATFORM_CKB_ADDRESS')?.trim() ??
+      this.config.get<string>('NEXT_PUBLIC_PLATFORM_CKB_ADDRESS')?.trim();
+    if (!platformStr) {
+      throw new Error('PLATFORM_CKB_ADDRESS is not set');
+    }
+    const platformAddr = await Address.fromString(platformStr, client);
+
+    const houseHash = hex32ToBytes(Script.from(houseAddr.script).hash());
+    const platformHash = hex32ToBytes(Script.from(platformAddr.script).hash());
+    const typeScript = this.crashTypeScript();
+
+    const minRemainder = CKB_MIN_OCCUPIED_CAPACITY_SHANNONS + 200_000n;
+    if (capIn < params.stakeShannons + minRemainder) {
+      throw new Error(
+        'Session cell capacity is insufficient for stake + change + fees',
+      );
+    }
+
+    const userAddrObj = await Address.fromString(params.userCkbAddress, client);
+    const userLockHash = hex32ToBytes(userAddrObj.script.hash());
+    const escrowData = encodeCrashEscrowCellDataV2({
+      roundId: params.chainRoundId,
+      serverSeedHashSha256: hex32ToBytes(params.serverSeedHashHex),
+      userLockHash,
+      houseLockHash: houseHash,
+      platformLockHash: platformHash,
+      stakeShannons: params.stakeShannons,
+      feeBps: params.feeBps,
+    });
+
+    const changeCap = capIn - params.stakeShannons - 50_000n;
+
+    const cellInput = CellInput.from({ previousOutput: outPoint });
+    await cellInput.completeExtraInfos(client);
+
+    const tx = Transaction.from({
+      version: 0,
+      cellDeps: [
+        ...(await this.gameSessionCellDeps(client)),
+        ...(await this.crashCellDeps(client)),
+      ],
+      headerDeps: [],
+      inputs: [],
+      outputs: [],
+      outputsData: [],
+      witnesses: [],
+    });
+
+    tx.addInput(cellInput);
+    tx.addOutput(
+      {
+        lock: houseAddr.script,
+        type: typeScript,
+        capacity: params.stakeShannons,
+      },
+      hexFrom(escrowData),
+    );
+    tx.addOutput(
+      {
+        lock: sessionLock,
+        capacity: changeCap,
+      },
+      '0x',
+    );
+
+    await tx.prepareSighashAllWitness(sessionLock, 66, client);
+
+    await tx.completeFeeChangeToOutput(
+      sessionSigner,
+      1,
+      await this.poolFeeRate(client),
+      undefined,
+      { shouldAddInputs: false },
+    );
+
+    const signInfo = await tx.getSignHashInfo(sessionLock, client);
+    if (!signInfo) {
+      throw new Error('Could not compute sign hash for game session input');
+    }
+
+    const sigHex = await (
+      sessionSigner as unknown as {
+        _signMessage: (m: string) => Promise<string>;
+      }
+    )._signMessage(signInfo.message);
+
+    const sigBytes = hexOutputDataToBytes(sigHex);
+    if (sigBytes.length !== 65) {
+      throw new Error('Unexpected session backend signature length');
+    }
+    const lockWitness = new Uint8Array(1 + 65);
+    lockWitness[0] = 1;
+    lockWitness.set(sigBytes, 1);
+
+    const curW = tx.getWitnessArgsAt(signInfo.position) ?? WitnessArgs.from({});
+    tx.setWitnessArgsAt(
+      signInfo.position,
+      WitnessArgs.from({
+        lock: hexFrom(lockWitness),
+        inputType: curW.inputType,
+        outputType: curW.outputType,
+      }),
+    );
+
+    const txHash = await client.sendTransaction(tx);
+    return {
+      txHash,
+      escrowOutputIndex: 0,
+      newSessionTxHash: txHash,
+      newSessionOutputIndex: 1,
+    };
   }
 }
 

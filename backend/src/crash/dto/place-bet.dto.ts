@@ -28,10 +28,12 @@ export class PlaceBetDto {
   clientSeed?: string;
 
   @IsOptional()
-  @IsIn(['escrow', 'balance'])
-  funding?: 'escrow' | 'balance';
+  @IsIn(['escrow', 'balance', 'session'])
+  funding?: 'escrow' | 'balance' | 'session';
 
-  @ValidateIf((o: PlaceBetDto) => o.funding !== 'balance')
+  @ValidateIf(
+    (o: PlaceBetDto) => o.funding !== 'balance' && o.funding !== 'session',
+  )
   @IsString()
   @IsNotEmpty()
   escrowTxHash?: string;

@@ -11,6 +11,7 @@ import {
 import { CashOutDto } from './dto/cash-out.dto';
 import { ConfirmDepositDto } from './dto/confirm-deposit.dto';
 import { PlaceBetDto } from './dto/place-bet.dto';
+import { RegisterSessionDto } from './dto/register-session.dto';
 import { CrashDepositService } from './crash-deposit.service';
 import { CrashService } from './crash.service';
 
@@ -32,6 +33,34 @@ export class CrashController {
       throw new BadRequestException('walletAddress is required');
     }
     return this.crashService.getWalletCkbBalances(walletAddress.trim());
+  }
+
+  @Get('session/config')
+  sessionConfig() {
+    return this.crashService.getPatternASessionConfig();
+  }
+
+  @Get('session')
+  getSession(@Query('walletAddress') walletAddress: string | undefined) {
+    if (!walletAddress?.trim()) {
+      throw new BadRequestException('walletAddress is required');
+    }
+    return this.crashService.getGameSession(walletAddress.trim());
+  }
+
+  @Post('session/register')
+  async registerSession(@Body() body: RegisterSessionDto) {
+    try {
+      return await this.crashService.registerGameSession(
+        body.walletAddress.trim(),
+        body.txHash.trim(),
+        body.outputIndex,
+      );
+    } catch (e) {
+      throw new BadRequestException(
+        e instanceof Error ? e.message : 'Could not register session',
+      );
+    }
   }
 
   @Post('deposit')
@@ -81,7 +110,7 @@ export class CrashController {
         body.clientSeed,
         body.escrowTxHash,
         body.escrowOutputIndex,
-        funding,
+        funding as 'escrow' | 'balance' | 'session',
       );
     } catch (e) {
       throw new BadRequestException(
