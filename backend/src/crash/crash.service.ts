@@ -1277,6 +1277,8 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
         sessionTxHash: string;
         sessionOutputIndex: number;
         updatedAt: string;
+        capacityCkb: string;
+        capacityShannons: string;
       }
   > {
     const [row] = await this.db
@@ -1288,7 +1290,17 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       .from(crashGameSessions)
       .where(eq(crashGameSessions.ckbAddress, walletAddress))
       .limit(1);
-    if (!row) {
+    if (!row?.sessionTxHash?.trim()) {
+      return { active: false };
+    }
+    const cap = await this.onchain.getLiveSessionCellCapacityShannons({
+      sessionTxHash: row.sessionTxHash.trim(),
+      sessionOutputIndex: row.sessionOutputIndex,
+    });
+    if (cap === null) {
+      await this.db
+        .delete(crashGameSessions)
+        .where(eq(crashGameSessions.ckbAddress, walletAddress));
       return { active: false };
     }
     return {
@@ -1296,6 +1308,15 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       sessionTxHash: row.sessionTxHash,
       sessionOutputIndex: row.sessionOutputIndex,
       updatedAt: row.updatedAt.toISOString(),
+      capacityCkb: fixedPointToString(cap, 8),
+      capacityShannons: cap.toString(),
     };
+  }
+
+  async closeGameSession(walletAddress: string): Promise<{ ok: true }> {
+    await this.db
+      .delete(crashGameSessions)
+      .where(eq(crashGameSessions.ckbAddress, walletAddress.trim()));
+    return { ok: true };
   }
 }

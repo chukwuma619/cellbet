@@ -77,11 +77,21 @@ export type PatternASessionPublicConfig = {
 } | null;
 
 export async function fetchPatternASessionConfig(): Promise<PatternASessionPublicConfig> {
-  const res = await fetch(`${getApiBaseUrl()}/crash/session/config`, {
-    cache: "no-store",
-  });
-  if (!res.ok) return null;
-  return res.json() as Promise<PatternASessionPublicConfig>;
+  try {
+    const res = await fetch(`${getApiBaseUrl()}/crash/session/config`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const text = await res.text();
+    if (!text.trim()) return null;
+    try {
+      return JSON.parse(text) as PatternASessionPublicConfig;
+    } catch {
+      return null;
+    }
+  } catch {
+    return null;
+  }
 }
 
 export type GameSessionStatus =
@@ -91,6 +101,9 @@ export type GameSessionStatus =
       sessionTxHash: string;
       sessionOutputIndex: number;
       updatedAt: string;
+      /** Remaining CKB in the on-chain game-wallet cell (Pattern A). */
+      capacityCkb?: string;
+      capacityShannons?: string;
     };
 
 export async function fetchGameSessionStatus(
@@ -104,7 +117,13 @@ export async function fetchGameSessionStatus(
   if (!res.ok) {
     return { active: false };
   }
-  return res.json() as Promise<GameSessionStatus>;
+  const text = await res.text();
+  if (!text.trim()) return { active: false };
+  try {
+    return JSON.parse(text) as GameSessionStatus;
+  } catch {
+    return { active: false };
+  }
 }
 
 export async function postRegisterGameSession(body: {
@@ -125,6 +144,26 @@ export async function postRegisterGameSession(body: {
       ? data.message.join(", ")
       : data?.message;
     throw new Error(msg || "Could not register game session");
+  }
+  return data as { ok: true };
+}
+
+export async function postCloseGameSession(body: {
+  walletAddress: string;
+}): Promise<{ ok: true }> {
+  const res = await fetch(`${getApiBaseUrl()}/crash/session/close`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    message?: string | string[];
+  };
+  if (!res.ok) {
+    const msg = Array.isArray(data?.message)
+      ? data.message.join(", ")
+      : data?.message;
+    throw new Error(msg || "Could not clear session");
   }
   return data as { ok: true };
 }

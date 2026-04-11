@@ -792,6 +792,26 @@ export class CrashOnchainService {
     });
   }
 
+  /** Live game-wallet cell capacity, or `null` if the cell is spent or not yet visible. */
+  async getLiveSessionCellCapacityShannons(params: {
+    sessionTxHash: string;
+    sessionOutputIndex: number;
+  }): Promise<bigint | null> {
+    const client = this.ckbRpc.getCccClient();
+    await this.clearCccClientCellAndTxCache(client);
+    const outPoint = {
+      txHash: normalizeTxHash(params.sessionTxHash),
+      index: params.sessionOutputIndex,
+    };
+    const live =
+      (await client.getCellLive(outPoint, true, true)) ??
+      (await client.getCellLiveNoCache(outPoint, true, true));
+    if (!live) {
+      return null;
+    }
+    return BigInt(live.cellOutput.capacity.toString());
+  }
+
   private async fetchVerifiedSessionCellContext(params: {
     sessionTxHash: string;
     sessionOutputIndex: number;

@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 
 import { CashOutDto } from './dto/cash-out.dto';
+import { CloseSessionDto } from './dto/close-session.dto';
 import { ConfirmDepositDto } from './dto/confirm-deposit.dto';
 import { PlaceBetDto } from './dto/place-bet.dto';
 import { RegisterSessionDto } from './dto/register-session.dto';
@@ -61,6 +62,11 @@ export class CrashController {
         e instanceof Error ? e.message : 'Could not register session',
       );
     }
+  }
+
+  @Post('session/close')
+  closeSession(@Body() body: CloseSessionDto) {
+    return this.crashService.closeGameSession(body.walletAddress);
   }
 
   @Post('deposit')

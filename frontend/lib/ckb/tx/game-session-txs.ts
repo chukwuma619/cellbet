@@ -5,6 +5,7 @@ import {
 } from "@cellbet/shared";
 import {
   CellDep,
+  CellInput,
   Script,
   Transaction,
   fixedPointFrom,
@@ -151,6 +152,80 @@ export async function buildFundGameSessionCellTx(params: {
   try {
     await tx.completeInputsByCapacity(signer);
     await tx.completeFeeBy(signer);
+    return await signer.sendTransaction(tx);
+  } catch (e) {
+    throw mapCkbException(e);
+  }
+}
+
+/**
+ * User-signed withdrawal: consume the game-session cell and return CKB to the user's default lock.
+ * Call `POST /crash/session/close` after broadcast so the API stops tracking the spent out-point.
+ */
+export async function buildWithdrawGameSessionCellTx(params: {
+  signer: Signer;
+  sessionTxHash: Hex;
+  sessionOutputIndex: number;
+}): Promise<Hex> {
+  const { signer, sessionTxHash, sessionOutputIndex } = params;
+  const client = signer.client;
+  if (!clientMatchesExpectedNetwork(client)) {
+    throw new CellbetCkbError(
+      "Wallet is not on the network this app expects.",
+      "WRONG_NETWORK",
+    );
+  }
+
+  const sessionCfg = sessionCfgOrThrow(
+    "Game session lock is not configured in env (NEXT_PUBLIC_GAME_SESSION_LOCK_*).",
+  );
+
+  const txHashNorm = sessionTxHash.startsWith("0x")
+    ? sessionTxHash
+    : (`0x${sessionTxHash}` as Hex);
+  const outPoint = { txHash: txHashNorm, index: sessionOutputIndex };
+  const live =
+    (await client.getCellLive(outPoint, true, true)) ??
+    (await client.getCellLiveNoCache(outPoint, true, true));
+  if (!live) {
+    throw new CellbetCkbError(
+      "Game wallet cell is not live (wait for confirmation or check tx / index).",
+      "UNKNOWN",
+    );
+  }
+
+  const sessionLock = Script.from(live.cellOutput.lock);
+  const cap = BigInt(live.cellOutput.capacity.toString());
+
+  const cellInput = CellInput.from({ previousOutput: outPoint });
+  await cellInput.completeExtraInfos(client);
+
+  const userAddr = await signer.getRecommendedAddressObj();
+
+  const tx = Transaction.from({
+    version: 0,
+    cellDeps: [gameSessionCellDep(sessionCfg)],
+    headerDeps: [],
+    inputs: [],
+    outputs: [],
+    outputsData: [],
+    witnesses: [],
+  });
+
+  tx.addInput(cellInput);
+  tx.addOutput(
+    {
+      capacity: cap,
+      lock: userAddr.script,
+    },
+    "0x",
+  );
+
+  try {
+    await tx.prepareSighashAllWitness(sessionLock, 65, client);
+    await tx.completeFeeChangeToOutput(signer, 0, undefined, undefined, {
+      shouldAddInputs: false,
+    });
     return await signer.sendTransaction(tx);
   } catch (e) {
     throw mapCkbException(e);

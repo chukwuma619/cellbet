@@ -1,7 +1,11 @@
 "use client";
 
 import { CKB_MIN_OCCUPIED_CAPACITY_SHANNONS } from "@cellbet/shared";
-import { fixedPointFrom, fixedPointToString } from "@ckb-ccc/core";
+import {
+  fixedPointFrom,
+  fixedPointToString,
+  type Hex,
+} from "@ckb-ccc/core";
 import { useCcc } from "@ckb-ccc/connector-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -25,6 +29,7 @@ import {
   fetchPatternASessionConfig,
   postBet,
   postCashOut,
+  postCloseGameSession,
   postCrashDepositConfirm,
   postRegisterGameSession,
 } from "@/lib/api";
@@ -36,6 +41,7 @@ import { CellbetCkbError, userMessageForCkbError } from "@/lib/ckb/errors";
 import { isGameSessionLockConfigured } from "@/lib/ckb/game-session-config";
 import {
   buildFundGameSessionCellTx,
+  buildWithdrawGameSessionCellTx,
   gameSessionCapacityFromCkbString,
 } from "@/lib/ckb/tx/game-session-txs";
 import { buildPlaceBetTx } from "@/lib/ckb/tx/game-txs";
@@ -71,12 +77,14 @@ export function CrashGameClient() {
     active: boolean;
     sessionTxHash?: string;
     sessionOutputIndex?: number;
+    capacityCkb?: string;
   }>({ active: false });
   const [sessionAmount, setSessionAmount] = useState("200");
   const [sessionFundBusy, setSessionFundBusy] = useState(false);
   const [sessionRegTx, setSessionRegTx] = useState("");
   const [sessionRegIdx, setSessionRegIdx] = useState("0");
   const [sessionRegBusy, setSessionRegBusy] = useState(false);
+  const [sessionWithdrawBusy, setSessionWithdrawBusy] = useState(false);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 200);
@@ -172,6 +180,7 @@ export function CrashGameClient() {
             active: true,
             sessionTxHash: s.sessionTxHash,
             sessionOutputIndex: s.sessionOutputIndex,
+            capacityCkb: s.capacityCkb,
           });
         } else {
           setSessionStatus({ active: false });
@@ -261,6 +270,7 @@ export function CrashGameClient() {
                 active: true,
                 sessionTxHash: s.sessionTxHash,
                 sessionOutputIndex: s.sessionOutputIndex,
+                capacityCkb: s.capacityCkb,
               });
             }
           } catch {
@@ -420,9 +430,35 @@ export function CrashGameClient() {
         capacityShannons: cap,
         backendLockArgsHex: sessionBackendArgsHex.trim(),
       });
-      setSessionRegTx(txHash.startsWith("0x") ? txHash.slice(2) : txHash);
-      toast.success("Session cell tx sent — register the out point below.");
+      const norm = txHash.startsWith("0x") ? txHash : `0x${txHash}`;
+      setSessionRegTx(norm.replace(/^0x/i, ""));
       await refreshBalances();
+      try {
+        await postRegisterGameSession({
+          walletAddress: address.trim(),
+          txHash: norm,
+          outputIndex: 0,
+        });
+        const s = await fetchGameSessionStatus(address.trim());
+        if (s.active) {
+          setSessionStatus({
+            active: true,
+            sessionTxHash: s.sessionTxHash,
+            sessionOutputIndex: s.sessionOutputIndex,
+            capacityCkb: s.capacityCkb,
+          });
+        }
+        toast.success(
+          "Game wallet live — Pattern A bets no longer need a per-round wallet signature.",
+        );
+        setSessionRegTx("");
+      } catch (regErr) {
+        toast.error(
+          regErr instanceof Error
+            ? `${regErr.message} Use “Register session” below after the tx confirms (output index is usually 0).`
+            : "Register manually below once the funding transaction confirms.",
+        );
+      }
     } catch (e) {
       if (e instanceof CellbetCkbError) {
         toast.error(userMessageForCkbError(e));
@@ -462,6 +498,7 @@ export function CrashGameClient() {
           active: true,
           sessionTxHash: s.sessionTxHash,
           sessionOutputIndex: s.sessionOutputIndex,
+          capacityCkb: s.capacityCkb,
         });
       }
       toast.success("Game session registered — bets use Pattern A (no per-bet sign).");
@@ -470,6 +507,47 @@ export function CrashGameClient() {
       toast.error(e instanceof Error ? e.message : "Register failed");
     } finally {
       setSessionRegBusy(false);
+    }
+  }
+
+  async function onWithdrawSession() {
+    if (!address?.trim()) {
+      openConnector();
+      return;
+    }
+    if (!sessionStatus.active || !sessionStatus.sessionTxHash) {
+      toast.error("No active game wallet to withdraw.");
+      return;
+    }
+    const signer = signerInfo?.signer;
+    if (!signer) {
+      openConnector();
+      return;
+    }
+    setSessionWithdrawBusy(true);
+    try {
+      const h = (
+        sessionStatus.sessionTxHash.startsWith("0x")
+          ? sessionStatus.sessionTxHash
+          : `0x${sessionStatus.sessionTxHash}`
+      ) as Hex;
+      await buildWithdrawGameSessionCellTx({
+        signer,
+        sessionTxHash: h,
+        sessionOutputIndex: sessionStatus.sessionOutputIndex ?? 0,
+      });
+      await postCloseGameSession({ walletAddress: address.trim() });
+      setSessionStatus({ active: false });
+      toast.success("Game wallet withdrawn to your address — session cleared on the server.");
+      await refreshBalances();
+    } catch (e) {
+      if (e instanceof CellbetCkbError) {
+        toast.error(userMessageForCkbError(e));
+      } else {
+        toast.error(e instanceof Error ? e.message : "Withdraw failed");
+      }
+    } finally {
+      setSessionWithdrawBusy(false);
     }
   }
 
@@ -670,16 +748,27 @@ export function CrashGameClient() {
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <p className="text-muted-foreground leading-snug">
-                One signature funds a session cell; bets then settle without wallet
-                popups. Withdraw anytime by spending the session cell with your key.
+                Matches the on-chain Pattern A flow: one user signature creates a
+                game-wallet cell; the lock script only lets the server co-sign
+                spends into crash escrow. Without this wallet (and without pool
+                balance), each bet uses L1 escrow and your wallet signs every
+                time.
               </p>
               {sessionStatus.active ? (
-                <p className="text-xs font-mono text-muted-foreground break-all">
-                  Live{" "}
-                  {sessionStatus.sessionTxHash
-                    ? `${sessionStatus.sessionTxHash}:${String(sessionStatus.sessionOutputIndex ?? 0)}`
-                    : "—"}
-                </p>
+                <div className="space-y-1 text-xs text-muted-foreground">
+                  <p>
+                    On-chain balance ≈{" "}
+                    <span className="font-mono text-foreground">
+                      {sessionStatus.capacityCkb ?? "…"} CKB
+                    </span>
+                  </p>
+                  <p className="font-mono break-all">
+                    Out-point{" "}
+                    {sessionStatus.sessionTxHash
+                      ? `${sessionStatus.sessionTxHash}:${String(sessionStatus.sessionOutputIndex ?? 0)}`
+                      : "—"}
+                  </p>
+                </div>
               ) : (
                 <p className="text-xs text-muted-foreground">No active session</p>
               )}
@@ -731,6 +820,19 @@ export function CrashGameClient() {
               >
                 {sessionRegBusy ? "Registering…" : "Register session"}
               </Button>
+              {sessionStatus.active ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  disabled={sessionWithdrawBusy || !isConnected}
+                  onClick={() => void onWithdrawSession()}
+                >
+                  {sessionWithdrawBusy
+                    ? "Signing withdraw…"
+                    : "Withdraw game wallet (sign once)"}
+                </Button>
+              ) : null}
             </CardContent>
           </Card>
         ) : null}
