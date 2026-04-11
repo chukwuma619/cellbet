@@ -10,30 +10,17 @@ import {
 
 import { CashOutDto } from './dto/cash-out.dto';
 import { CloseSessionDto } from './dto/close-session.dto';
-import { ConfirmDepositDto } from './dto/confirm-deposit.dto';
 import { PlaceBetDto } from './dto/place-bet.dto';
 import { RegisterSessionDto } from './dto/register-session.dto';
-import { CrashDepositService } from './crash-deposit.service';
 import { CrashService } from './crash.service';
 
 @Controller('crash')
 export class CrashController {
-  constructor(
-    private readonly crashService: CrashService,
-    private readonly crashDepositService: CrashDepositService,
-  ) {}
+  constructor(private readonly crashService: CrashService) {}
 
   @Get('state')
   getState() {
     return this.crashService.getPublicSnapshotAsync();
-  }
-
-  @Get('balance')
-  getBalance(@Query('walletAddress') walletAddress: string | undefined) {
-    if (!walletAddress?.trim()) {
-      throw new BadRequestException('walletAddress is required');
-    }
-    return this.crashService.getWalletCkbBalances(walletAddress.trim());
   }
 
   @Get('session/config')
@@ -69,15 +56,6 @@ export class CrashController {
     return this.crashService.closeGameSession(body.walletAddress);
   }
 
-  @Post('deposit')
-  async confirmDeposit(@Body() body: ConfirmDepositDto) {
-    return this.crashDepositService.confirmDeposit({
-      walletAddress: body.walletAddress.trim(),
-      txHash: body.txHash.trim(),
-      outputIndex: body.outputIndex ?? 0,
-    });
-  }
-
   @Get('rounds/:roundId/proof')
   getRoundProof(@Param('roundId') roundId: string) {
     return this.crashService.getRoundProof(roundId);
@@ -109,14 +87,10 @@ export class CrashController {
   @Post('bets')
   async placeBet(@Body() body: PlaceBetDto) {
     try {
-      const funding = body.funding ?? 'escrow';
       return await this.crashService.placeBet(
         body.walletAddress,
         body.amount,
         body.clientSeed,
-        body.escrowTxHash,
-        body.escrowOutputIndex,
-        funding as 'escrow' | 'balance' | 'session',
       );
     } catch (e) {
       throw new BadRequestException(

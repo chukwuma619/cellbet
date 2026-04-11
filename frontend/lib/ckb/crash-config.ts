@@ -78,8 +78,3 @@ export function isCrashOnChainConfigured(): boolean {
     return false;
   }
 }
-
-export function getCrashPoolDepositAddress(): string | null {
-  const v = process.env.NEXT_PUBLIC_CRASH_POOL_DEPOSIT_CKB_ADDRESS?.trim();
-  return v ?? null;
-}

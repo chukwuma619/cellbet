@@ -92,6 +92,13 @@
       "when": 1776200000000,
       "tag": "0012_crash_game_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1776300000000,
+      "tag": "0013_pattern_a_schema_cleanup",
+      "breakpoints": true
     }
   ]
 }

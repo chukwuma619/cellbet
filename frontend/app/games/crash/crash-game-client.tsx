@@ -24,19 +24,14 @@ import { useCkbAddress } from "@/hooks/use-ckb-address";
 import { useOnChainCkbBalance } from "@/hooks/use-on-chain-ckb-balance";
 import { useCrashSocket } from "@/hooks/use-crash-socket";
 import {
-  fetchCrashCkbBalance,
   fetchGameSessionStatus,
   fetchPatternASessionConfig,
   postBet,
   postCashOut,
   postCloseGameSession,
-  postCrashDepositConfirm,
   postRegisterGameSession,
 } from "@/lib/api";
-import {
-  getCrashPoolDepositAddress,
-  isCrashOnChainConfigured,
-} from "@/lib/ckb/crash-config";
+import { isCrashOnChainConfigured } from "@/lib/ckb/crash-config";
 import { CellbetCkbError, userMessageForCkbError } from "@/lib/ckb/errors";
 import { isGameSessionLockConfigured } from "@/lib/ckb/game-session-config";
 import {
@@ -44,7 +39,6 @@ import {
   buildWithdrawGameSessionCellTx,
   gameSessionCapacityFromCkbString,
 } from "@/lib/ckb/tx/game-session-txs";
-import { buildPlaceBetTx } from "@/lib/ckb/tx/game-txs";
 
 const MIN_ONCHAIN_STAKE_CKB = Number(
   fixedPointToString(CKB_MIN_OCCUPIED_CAPACITY_SHANNONS, 8),
@@ -56,11 +50,7 @@ export function CrashGameClient() {
   const { round, participants } = useCrashSocket();
   const { address, isConnected, openConnector } = useCkbAddress();
   const { signerInfo } = useCcc();
-  const { shannons, displayShort, refresh } = useOnChainCkbBalance(address);
-  const [poolShannons, setPoolShannons] = useState<bigint | null>(null);
-  const [depositTx, setDepositTx] = useState("");
-  const [depositOutIdx, setDepositOutIdx] = useState("0");
-  const [depositBusy, setDepositBusy] = useState(false);
+  const { displayShort, refresh } = useOnChainCkbBalance(address);
   const [now, setNow] = useState(() => Date.now());
   const [amountA, setAmountA] = useState("10");
   const [amountB, setAmountB] = useState("10");
@@ -132,25 +122,35 @@ export function CrashGameClient() {
       : 0;
 
   const ckbGameConfigured = isCrashOnChainConfigured();
-  const poolDepositAddr = getCrashPoolDepositAddress();
+  const patternAConfigured =
+    isGameSessionLockConfigured() && Boolean(sessionBackendArgsHex?.trim());
 
-  const refreshBalances = useCallback(async () => {
-    await refresh();
-    if (!address?.trim()) {
-      setPoolShannons(null);
-      return;
-    }
+  const refreshSessionForAddress = useCallback(async (addr: string) => {
     try {
-      const b = await fetchCrashCkbBalance(address.trim());
-      setPoolShannons(fixedPointFrom(b.poolCkb || "0", 8));
+      const s = await fetchGameSessionStatus(addr);
+      if (s.active) {
+        setSessionStatus({
+          active: true,
+          sessionTxHash: s.sessionTxHash,
+          sessionOutputIndex: s.sessionOutputIndex,
+          capacityCkb: s.capacityCkb,
+        });
+      } else {
+        setSessionStatus({ active: false });
+      }
     } catch {
-      setPoolShannons(null);
+      setSessionStatus({ active: false });
     }
-  }, [address, refresh]);
+  }, []);
+
+  const refreshAfterChainAction = useCallback(async () => {
+    await refresh();
+    if (address?.trim()) await refreshSessionForAddress(address.trim());
+  }, [address, refresh, refreshSessionForAddress]);
 
   useEffect(() => {
-    void refreshBalances();
-  }, [refreshBalances]);
+    void refresh();
+  }, [refresh]);
 
   useEffect(() => {
     let cancelled = false;
@@ -194,11 +194,16 @@ export function CrashGameClient() {
     };
   }, [address]);
 
-  function stakeAmountCovered(amountStr: string) {
+  /** Active game wallet with enough on-chain capacity for the stake (when API reports capacity). */
+  function sessionCoversStake(amountStr: string) {
+    if (!sessionStatus.active) return false;
     const need = fixedPointFrom(amountStr.trim() || "0", 8);
-    if (poolShannons !== null && need <= poolShannons) return true;
-    if (shannons !== null && need <= shannons) return true;
-    return false;
+    const capStr = sessionStatus.capacityCkb?.trim();
+    if (capStr) {
+      const cap = fixedPointFrom(capStr, 8);
+      return need <= cap;
+    }
+    return true;
   }
 
   function applyBetIdFromResponse(slot: StakeSlot, raw: unknown) {
@@ -214,9 +219,9 @@ export function CrashGameClient() {
       openConnector();
       return;
     }
-    if (!ckbGameConfigured) {
+    if (!ckbGameConfigured || !patternAConfigured) {
       toast.error(
-        "Crash requires NEXT_PUBLIC_CRASH_ROUND_* scripts and house/platform addresses in env.",
+        "Configure crash scripts, NEXT_PUBLIC_GAME_SESSION_LOCK_*, and server GAME_SESSION_* / GAME_SESSION_BACKEND_PRIVATE_KEY.",
       );
       return;
     }
@@ -238,8 +243,12 @@ export function CrashGameClient() {
       );
       return;
     }
-    if (!stakeAmountCovered(amountStr)) {
-      toast.error("Insufficient pool or on-chain CKB");
+    if (!sessionStatus.active) {
+      toast.error("Fund and register a game wallet (Pattern A) before betting.");
+      return;
+    }
+    if (!sessionCoversStake(amountStr)) {
+      toast.error("Game wallet balance is too low for this stake (or refresh after funding).");
       return;
     }
     setBusy(true);
@@ -250,70 +259,13 @@ export function CrashGameClient() {
         toast.error("Round data not ready — wait for the next betting window.");
         return;
       }
-      const stakeNeed = fixedPointFrom(amountStr.trim() || "0", 8);
-      const usePool =
-        poolShannons !== null && stakeNeed <= poolShannons;
-
-      if (sessionStatus.active) {
-        const raw = await postBet({
-          walletAddress: address,
-          amount: n,
-          funding: "session",
-        });
-        applyBetIdFromResponse(slot, raw);
-        await refreshBalances();
-        if (address?.trim()) {
-          try {
-            const s = await fetchGameSessionStatus(address.trim());
-            if (s.active) {
-              setSessionStatus({
-                active: true,
-                sessionTxHash: s.sessionTxHash,
-                sessionOutputIndex: s.sessionOutputIndex,
-                capacityCkb: s.capacityCkb,
-              });
-            }
-          } catch {
-            /* ignore */
-          }
-        }
-        toast.success("Bet placed (session)");
-        return;
-      }
-
-      if (usePool) {
-        const raw = await postBet({
-          walletAddress: address,
-          amount: n,
-          funding: "balance",
-        });
-        applyBetIdFromResponse(slot, raw);
-        await refreshBalances();
-        toast.success("Bet placed");
-        return;
-      }
-
-      const signer = signerInfo?.signer;
-      if (!signer) {
-        openConnector();
-        return;
-      }
-      const stakeShannons = fixedPointFrom(amountStr.trim() || "0", 8);
-      const escrowTxHash = await buildPlaceBetTx({
-        signer,
-        roundId: BigInt(chainRoundId),
-        stakeShannons,
-        serverSeedHashHex: seedHash,
-      });
       const raw = await postBet({
         walletAddress: address,
         amount: n,
-        funding: "escrow",
-        escrowTxHash,
-        escrowOutputIndex: 0,
       });
       applyBetIdFromResponse(slot, raw);
-      await refreshBalances();
+      await refreshAfterChainAction();
+      if (address?.trim()) await refreshSessionForAddress(address.trim());
       toast.success("Bet placed");
     } catch (e) {
       if (e instanceof CellbetCkbError) {
@@ -334,7 +286,7 @@ export function CrashGameClient() {
     setBusy(true);
     try {
       await postCashOut(address, id);
-      await refreshBalances();
+      await refreshAfterChainAction();
       if (slot === "a") setBetIdA(null);
       else setBetIdB(null);
       toast.success("Cashed out");
@@ -350,22 +302,25 @@ export function CrashGameClient() {
   );
   const commitReady = round?.commitAnchored === true;
 
-  const sessionCoversStake = (amountStr: string) =>
-    sessionStatus.active ||
-    stakeAmountCovered(amountStr);
-
   const baseCanBet =
     isConnected &&
     ckbGameConfigured &&
+    patternAConfigured &&
     phase === "betting" &&
     bettingLeftSec > 0 &&
     chainRoundReady &&
     commitReady;
 
   const canBetA =
-    baseCanBet && sessionCoversStake(amountA) && !betIdA && !busyBetA;
+    baseCanBet &&
+    sessionCoversStake(amountA) &&
+    !betIdA &&
+    !busyBetA;
   const canBetB =
-    baseCanBet && sessionCoversStake(amountB) && !betIdB && !busyBetB;
+    baseCanBet &&
+    sessionCoversStake(amountB) &&
+    !betIdB &&
+    !busyBetB;
 
   const canCashOutA =
     isConnected &&
@@ -385,15 +340,17 @@ export function CrashGameClient() {
       ? "Bet"
       : phase !== "betting"
         ? "Wait"
-        : !sessionCoversStake(amountStr)
-          ? "Insufficient balance"
-          : !ckbGameConfigured
-            ? "Configure CKB env"
-            : !chainRoundReady
-              ? "Syncing round…"
-              : !commitReady
-                ? "Anchoring…"
-                : "Betting closed";
+        : !patternAConfigured || !ckbGameConfigured
+          ? "Configure env"
+          : !sessionStatus.active
+            ? "Fund game wallet"
+            : !sessionCoversStake(amountStr)
+              ? "Low game wallet"
+              : !chainRoundReady
+                ? "Syncing round…"
+                : !commitReady
+                  ? "Anchoring…"
+                  : "Betting closed";
   }
 
   async function onFundSession() {
@@ -432,7 +389,7 @@ export function CrashGameClient() {
       });
       const norm = txHash.startsWith("0x") ? txHash : `0x${txHash}`;
       setSessionRegTx(norm.replace(/^0x/i, ""));
-      await refreshBalances();
+      await refreshAfterChainAction();
       try {
         await postRegisterGameSession({
           walletAddress: address.trim(),
@@ -539,7 +496,7 @@ export function CrashGameClient() {
       await postCloseGameSession({ walletAddress: address.trim() });
       setSessionStatus({ active: false });
       toast.success("Game wallet withdrawn to your address — session cleared on the server.");
-      await refreshBalances();
+      await refreshAfterChainAction();
     } catch (e) {
       if (e instanceof CellbetCkbError) {
         toast.error(userMessageForCkbError(e));
@@ -548,42 +505,6 @@ export function CrashGameClient() {
       }
     } finally {
       setSessionWithdrawBusy(false);
-    }
-  }
-
-  async function onConfirmDeposit() {
-    if (!address?.trim()) {
-      openConnector();
-      return;
-    }
-    const h = depositTx.trim();
-    if (!h) {
-      toast.error("Enter the deposit transaction hash");
-      return;
-    }
-    const idx = Number.parseInt(depositOutIdx.trim() || "0", 10);
-    if (!Number.isFinite(idx) || idx < 0) {
-      toast.error("Invalid output index");
-      return;
-    }
-    setDepositBusy(true);
-    try {
-      const r = await postCrashDepositConfirm({
-        walletAddress: address.trim(),
-        txHash: h,
-        outputIndex: idx,
-      });
-      await refreshBalances();
-      toast.success(
-        r.alreadyCredited
-          ? "Deposit was already credited"
-          : `Credited ${r.creditedCkb} CKB to your pool`,
-      );
-      setDepositTx("");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Deposit confirm failed");
-    } finally {
-      setDepositBusy(false);
     }
   }
 
@@ -644,12 +565,14 @@ export function CrashGameClient() {
                 <div className="flex items-center justify-between gap-2">
                   <Label htmlFor="stake-a">Amount (CKB)</Label>
                   <span className="text-muted-foreground font-mono text-xs tabular-nums">
-                    {poolShannons !== null && (
+                    {sessionStatus.active && sessionStatus.capacityCkb ? (
                       <span className="mr-2">
-                        Pool {fixedPointToString(poolShannons, 8)}
+                        Wallet {sessionStatus.capacityCkb}
                       </span>
-                    )}
-                    {displayShort !== null && <span>L1 {displayShort}</span>}
+                    ) : null}
+                    {displayShort !== null ? (
+                      <span>L1 {displayShort}</span>
+                    ) : null}
                   </span>
                 </div>
 
@@ -698,12 +621,14 @@ export function CrashGameClient() {
                 <div className="flex items-center justify-between gap-2">
                   <Label htmlFor="stake-b">Amount (CKB)</Label>
                   <span className="text-muted-foreground font-mono text-xs tabular-nums">
-                    {poolShannons !== null && (
+                    {sessionStatus.active && sessionStatus.capacityCkb ? (
                       <span className="mr-2">
-                        Pool {fixedPointToString(poolShannons, 8)}
+                        Wallet {sessionStatus.capacityCkb}
                       </span>
-                    )}
-                    {displayShort !== null && <span>L1 {displayShort}</span>}
+                    ) : null}
+                    {displayShort !== null ? (
+                      <span>L1 {displayShort}</span>
+                    ) : null}
                   </span>
                 </div>
 
@@ -741,19 +666,24 @@ export function CrashGameClient() {
       </div>
 
       <div className="col-span-1 order-2 md:order-1 space-y-3">
-        {isGameSessionLockConfigured() && sessionBackendArgsHex ? (
-          <Card className="border-border/80">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Pattern A — game wallet</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <p className="text-muted-foreground leading-snug">
-                Matches the on-chain Pattern A flow: one user signature creates a
-                game-wallet cell; the lock script only lets the server co-sign
-                spends into crash escrow. Without this wallet (and without pool
-                balance), each bet uses L1 escrow and your wallet signs every
-                time.
+        <Card className="border-border/80">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Game wallet (Pattern A)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            {!patternAConfigured ? (
+              <p className="text-destructive text-xs leading-snug">
+                Set NEXT_PUBLIC_GAME_SESSION_LOCK_* on the app and
+                GAME_SESSION_BACKEND_PRIVATE_KEY plus GAME_SESSION_LOCK_* on the
+                API so GET /crash/session/config returns backend lock args.
               </p>
+            ) : (
+              <p className="text-muted-foreground leading-snug">
+                One signature creates the game-wallet cell. The lock only allows
+                the server to co-sign spends into crash escrow; bets do not open
+                your wallet. Use L1 CKB only to fund or withdraw this cell.
+              </p>
+            )}
               {sessionStatus.active ? (
                 <div className="space-y-1 text-xs text-muted-foreground">
                   <p>
@@ -779,14 +709,18 @@ export function CrashGameClient() {
                   inputMode="decimal"
                   value={sessionAmount}
                   onChange={(e) => setSessionAmount(e.target.value)}
-                  disabled={sessionFundBusy || !isConnected}
+                  disabled={
+                    sessionFundBusy || !isConnected || !patternAConfigured
+                  }
                 />
               </div>
               <Button
                 type="button"
                 variant="secondary"
                 className="w-full"
-                disabled={sessionFundBusy || !isConnected}
+                disabled={
+                  sessionFundBusy || !isConnected || !patternAConfigured
+                }
                 onClick={() => void onFundSession()}
               >
                 {sessionFundBusy ? "Signing…" : "Fund session cell"}
@@ -799,7 +733,7 @@ export function CrashGameClient() {
                   placeholder="0x…"
                   value={sessionRegTx}
                   onChange={(e) => setSessionRegTx(e.target.value)}
-                  disabled={sessionRegBusy}
+                  disabled={sessionRegBusy || !patternAConfigured}
                 />
               </div>
               <div className="space-y-1">
@@ -809,13 +743,15 @@ export function CrashGameClient() {
                   inputMode="numeric"
                   value={sessionRegIdx}
                   onChange={(e) => setSessionRegIdx(e.target.value)}
-                  disabled={sessionRegBusy}
+                  disabled={sessionRegBusy || !patternAConfigured}
                 />
               </div>
               <Button
                 type="button"
                 className="w-full"
-                disabled={sessionRegBusy || !isConnected}
+                disabled={
+                  sessionRegBusy || !isConnected || !patternAConfigured
+                }
                 onClick={() => void onRegisterSession()}
               >
                 {sessionRegBusy ? "Registering…" : "Register session"}
@@ -835,53 +771,6 @@ export function CrashGameClient() {
               ) : null}
             </CardContent>
           </Card>
-        ) : null}
-        {poolDepositAddr ? (
-          <Card className="border-border/80">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Pool balance</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <p className="text-muted-foreground leading-snug">
-                Send CKB here, then submit the tx hash to credit your pool
-                balance.
-              </p>
-              <p className="font-mono text-xs break-all rounded-md bg-muted/50 p-2">
-                {poolDepositAddr}
-              </p>
-              <div className="space-y-1">
-                <Label htmlFor="dep-tx">Deposit tx hash</Label>
-                <Input
-                  id="dep-tx"
-                  className="font-mono text-xs"
-                  placeholder="0x…"
-                  value={depositTx}
-                  onChange={(e) => setDepositTx(e.target.value)}
-                  disabled={depositBusy}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="dep-idx">Output index</Label>
-                <Input
-                  id="dep-idx"
-                  inputMode="numeric"
-                  value={depositOutIdx}
-                  onChange={(e) => setDepositOutIdx(e.target.value)}
-                  disabled={depositBusy}
-                />
-              </div>
-              <Button
-                type="button"
-                variant="secondary"
-                className="w-full"
-                disabled={depositBusy || !isConnected}
-                onClick={() => void onConfirmDeposit()}
-              >
-                {depositBusy ? "Confirming…" : "Confirm deposit"}
-              </Button>
-            </CardContent>
-          </Card>
-        ) : null}
         <Card className="border-border/80 h-full">
           <CardContent className="pt-6 h-full">
             <CrashParticipantsTable participants={participants} />

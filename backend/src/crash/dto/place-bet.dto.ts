@@ -1,17 +1,14 @@
 import { Type } from 'class-transformer';
 import {
-  IsIn,
-  IsInt,
-  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
   Max,
   MaxLength,
   Min,
-  ValidateIf,
 } from 'class-validator';
 
+/** Pattern A only: server spends the registered game-wallet cell into crash escrow. */
 export class PlaceBetDto {
   @IsString()
   walletAddress!: string;
@@ -26,21 +23,4 @@ export class PlaceBetDto {
   @IsString()
   @MaxLength(256)
   clientSeed?: string;
-
-  @IsOptional()
-  @IsIn(['escrow', 'balance', 'session'])
-  funding?: 'escrow' | 'balance' | 'session';
-
-  @ValidateIf(
-    (o: PlaceBetDto) => o.funding !== 'balance' && o.funding !== 'session',
-  )
-  @IsString()
-  @IsNotEmpty()
-  escrowTxHash?: string;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  escrowOutputIndex?: number;
 }

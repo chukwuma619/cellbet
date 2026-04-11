@@ -11,14 +11,13 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
-import { and, asc, desc, eq, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import { CKB_MIN_OCCUPIED_CAPACITY_SHANNONS } from '@cellbet/shared';
 import {
   crashBets,
   crashGameSessions,
   crashRounds,
   type NeonDrizzle,
-  walletAccounts,
 } from '../db';
 import {
   crashCashoutAmounts,
@@ -361,34 +360,11 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async getWalletCkbBalances(walletAddress: string): Promise<{
-    onChainCkb: string;
-    poolCkb: string;
-    ckbBalance: string;
-  }> {
-    const shannons = await this.ckbRpc.getLiveCkbBalanceShannons(walletAddress);
-    const onChainCkb = fixedPointToString(shannons, 8);
-    const [row] = await this.db
-      .select({ pool: walletAccounts.ckbBalance })
-      .from(walletAccounts)
-      .where(eq(walletAccounts.ckbAddress, walletAddress))
-      .limit(1);
-    const poolCkb =
-      row?.pool != null && String(row.pool).length > 0 ? String(row.pool) : '0';
-    return {
-      onChainCkb,
-      poolCkb,
-      ckbBalance: onChainCkb,
-    };
-  }
-
+  /** Pattern A only: registered game-wallet cell → crash escrow via server co-sign. */
   async placeBet(
     walletAddress: string,
     amount: number,
     clientSeed?: string,
-    escrowTxHash?: string,
-    escrowOutputIndex?: number,
-    funding: 'escrow' | 'balance' | 'session' = 'escrow',
   ) {
     const r = this.runtime;
     if (!r || r.phase !== 'betting' || Date.now() >= r.bettingEndsAt) {
@@ -422,206 +398,47 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    if (funding === 'balance') {
-      const bet = await this.db.transaction(async (tx) => {
-        await tx
-          .insert(walletAccounts)
-          .values({
-            ckbAddress: walletAddress,
-            username: walletAddress,
-            ckbBalance: '0',
-          })
-          .onConflictDoNothing();
-
-        const updated = await tx
-          .update(walletAccounts)
-          .set({
-            ckbBalance: sql`(${walletAccounts.ckbBalance}::numeric - ${amountStr}::numeric)::numeric`,
-          })
-          .where(
-            and(
-              eq(walletAccounts.ckbAddress, walletAddress),
-              sql`${walletAccounts.ckbBalance}::numeric >= ${amountStr}::numeric`,
-            ),
-          )
-          .returning({ id: walletAccounts.id });
-
-        if (updated.length === 0) {
-          throw new Error('Insufficient pool balance');
-        }
-
-        const [row] = await tx
-          .insert(crashBets)
-          .values({
-            roundId: r.dbRoundId,
-            ckbAddress: walletAddress,
-            clientSeed: seed,
-            amount: amountStr,
-            status: 'pending',
-            escrowTxHash: null,
-            escrowOutputIndex: 0,
-            fundingSource: 'balance',
-          })
-          .returning();
-
-        return row;
-      });
-
-      if (!bet) {
-        throw new Error('Could not place bet');
-      }
-
-      const betId = String(bet.id);
-      this.gateway.emitBetPlaced({
-        betId,
-        roundId: r.dbRoundId,
-        ckbAddress: walletAddress,
-        amount: amountStr,
-        tokenSymbol: 'CKB',
-      });
-      void this.pushPublicState();
-      return {
-        betId,
-        roundId: r.dbRoundId,
-        amount: amountStr,
-        funding: 'balance',
-      };
-    }
-
-    if (funding === 'session') {
-      if (!this.config.get<string>('GAME_SESSION_BACKEND_PRIVATE_KEY')?.trim()) {
-        throw new Error('Session (Pattern A) bets are not configured on the server');
-      }
-      const [sess] = await this.db
-        .select({
-          sessionTxHash: crashGameSessions.sessionTxHash,
-          sessionOutputIndex: crashGameSessions.sessionOutputIndex,
-        })
-        .from(crashGameSessions)
-        .where(eq(crashGameSessions.ckbAddress, walletAddress))
-        .limit(1);
-      if (!sess?.sessionTxHash?.trim()) {
-        throw new Error(
-          'No registered game session. Fund a session cell, broadcast it, then POST /crash/session/register.',
-        );
-      }
-
-      const submitted = await this.onchain.submitSessionFundedBet({
-        sessionTxHash: sess.sessionTxHash.trim(),
-        sessionOutputIndex: sess.sessionOutputIndex,
-        userCkbAddress: walletAddress,
-        chainRoundId: r.chainRoundId,
-        serverSeedHashHex: r.serverSeedHash,
-        stakeShannons: newShannons,
-        feeBps,
-      });
-
-      const hNorm = submitted.txHash.startsWith('0x')
-        ? submitted.txHash
-        : (`0x${submitted.txHash}` as `0x${string}`);
-      const outIdx = submitted.escrowOutputIndex;
-
-      const [dupBet] = await this.db
-        .select({ id: crashBets.id })
-        .from(crashBets)
-        .where(
-          and(
-            eq(crashBets.roundId, r.dbRoundId),
-            eq(crashBets.escrowTxHash, hNorm),
-            eq(crashBets.escrowOutputIndex, outIdx),
-          ),
-        )
-        .limit(1);
-      if (dupBet) {
-        throw new Error(
-          'This escrow output is already registered for a bet in this round.',
-        );
-      }
-
-      await this.onchain.verifyUserEscrowCell({
-        escrowTxHash: hNorm,
-        escrowOutputIndex: outIdx,
-        userCkbAddress: walletAddress,
-        chainRoundId: r.chainRoundId,
-        serverSeedHashHex: r.serverSeedHash,
-        stakeShannons: newShannons,
-        feeBps,
-      });
-
-      const newSessTx = submitted.newSessionTxHash.startsWith('0x')
-        ? submitted.newSessionTxHash
-        : (`0x${submitted.newSessionTxHash}` as `0x${string}`);
-
-      await this.db
-        .update(crashGameSessions)
-        .set({
-          sessionTxHash: newSessTx,
-          sessionOutputIndex: submitted.newSessionOutputIndex,
-          updatedAt: new Date(),
-        })
-        .where(eq(crashGameSessions.ckbAddress, walletAddress));
-
-      await this.db
-        .insert(walletAccounts)
-        .values({
-          ckbAddress: walletAddress,
-          username: walletAddress,
-        })
-        .onConflictDoNothing();
-
-      const [bet] = await this.db
-        .insert(crashBets)
-        .values({
-          roundId: r.dbRoundId,
-          ckbAddress: walletAddress,
-          clientSeed: seed,
-          amount: amountStr,
-          status: 'pending',
-          escrowTxHash: hNorm,
-          escrowOutputIndex: outIdx,
-          fundingSource: 'session',
-        })
-        .returning();
-
-      if (!bet) {
-        throw new Error('Could not place bet');
-      }
-
-      const betId = String(bet.id);
-      this.gateway.emitBetPlaced({
-        betId,
-        roundId: r.dbRoundId,
-        ckbAddress: walletAddress,
-        amount: amountStr,
-        tokenSymbol: 'CKB',
-      });
-      void this.pushPublicState();
-      return {
-        betId,
-        roundId: r.dbRoundId,
-        amount: amountStr,
-        funding: 'session',
-      };
-    }
-
-    const h = escrowTxHash?.trim();
-    if (!h) {
+    if (!this.config.get<string>('GAME_SESSION_BACKEND_PRIVATE_KEY')?.trim()) {
       throw new Error(
-        'Sign and broadcast the place-bet CKB transaction, then submit escrowTxHash with your bet.',
+        'Pattern A is not configured (set GAME_SESSION_BACKEND_PRIVATE_KEY on the server).',
       );
     }
-    const outIdx =
-      escrowOutputIndex !== undefined && escrowOutputIndex !== null
-        ? Math.floor(escrowOutputIndex)
-        : 0;
-    const hNorm = h.startsWith('0x') ? h : `0x${h}`;
+    const [sess] = await this.db
+      .select({
+        sessionTxHash: crashGameSessions.sessionTxHash,
+        sessionOutputIndex: crashGameSessions.sessionOutputIndex,
+      })
+      .from(crashGameSessions)
+      .where(eq(crashGameSessions.ckbAddress, walletAddress))
+      .limit(1);
+    if (!sess?.sessionTxHash?.trim()) {
+      throw new Error(
+        'No registered game wallet. Fund a session cell and register it (POST /crash/session/register).',
+      );
+    }
+
+    const submitted = await this.onchain.submitSessionFundedBet({
+      sessionTxHash: sess.sessionTxHash.trim(),
+      sessionOutputIndex: sess.sessionOutputIndex,
+      userCkbAddress: walletAddress,
+      chainRoundId: r.chainRoundId,
+      serverSeedHashHex: r.serverSeedHash,
+      stakeShannons: newShannons,
+      feeBps,
+    });
+
+    const hNorm = submitted.txHash.startsWith('0x')
+      ? submitted.txHash
+      : (`0x${submitted.txHash}` as `0x${string}`);
+    const outIdx = submitted.escrowOutputIndex;
+
     const [dupBet] = await this.db
       .select({ id: crashBets.id })
       .from(crashBets)
       .where(
         and(
           eq(crashBets.roundId, r.dbRoundId),
-          or(eq(crashBets.escrowTxHash, h), eq(crashBets.escrowTxHash, hNorm)),
+          eq(crashBets.escrowTxHash, hNorm),
           eq(crashBets.escrowOutputIndex, outIdx),
         ),
       )
@@ -642,13 +459,18 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       feeBps,
     });
 
+    const newSessTx = submitted.newSessionTxHash.startsWith('0x')
+      ? submitted.newSessionTxHash
+      : (`0x${submitted.newSessionTxHash}` as `0x${string}`);
+
     await this.db
-      .insert(walletAccounts)
-      .values({
-        ckbAddress: walletAddress,
-        username: walletAddress,
+      .update(crashGameSessions)
+      .set({
+        sessionTxHash: newSessTx,
+        sessionOutputIndex: submitted.newSessionOutputIndex,
+        updatedAt: new Date(),
       })
-      .onConflictDoNothing();
+      .where(eq(crashGameSessions.ckbAddress, walletAddress));
 
     const [bet] = await this.db
       .insert(crashBets)
@@ -660,7 +482,6 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
         status: 'pending',
         escrowTxHash: hNorm,
         escrowOutputIndex: outIdx,
-        fundingSource: 'escrow',
       })
       .returning();
 
@@ -669,7 +490,6 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
     }
 
     const betId = String(bet.id);
-
     this.gateway.emitBetPlaced({
       betId,
       roundId: r.dbRoundId,
@@ -677,14 +497,12 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
       amount: amountStr,
       tokenSymbol: 'CKB',
     });
-
     void this.pushPublicState();
-
     return {
       betId,
       roundId: r.dbRoundId,
       amount: amountStr,
-      funding: 'escrow',
+      funding: 'session' as const,
     };
   }
 
@@ -705,7 +523,6 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
             amount: crashBets.amount,
             escrowTxHash: crashBets.escrowTxHash,
             escrowOutputIndex: crashBets.escrowOutputIndex,
-            fundingSource: crashBets.fundingSource,
           })
           .from(crashBets)
           .where(
@@ -723,7 +540,6 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
             amount: crashBets.amount,
             escrowTxHash: crashBets.escrowTxHash,
             escrowOutputIndex: crashBets.escrowOutputIndex,
-            fundingSource: crashBets.fundingSource,
           })
           .from(crashBets)
           .where(
@@ -750,88 +566,9 @@ export class CrashService implements OnModuleInit, OnModuleDestroy {
         ? crashCashoutAmounts(stake, mult, feeBps)
         : null;
 
-    if (candidate.fundingSource === 'balance') {
-      const netPayoutStr = amounts
-        ? amounts.netPayout.toFixed(8)
-        : '0';
-      const profitStr = amounts ? String(amounts.netProfit) : '0';
-
-      const updatedBet = await this.db.transaction(async (tx) => {
-        const [u] = await tx
-          .update(crashBets)
-          .set({
-            status: 'cashed_out',
-            cashedOutAtMultiplier: multStr,
-            profit: profitStr,
-            settlementTxHash: null,
-          })
-          .where(
-            and(eq(crashBets.id, candidate.id), eq(crashBets.status, 'pending')),
-          )
-          .returning();
-
-        if (!u) {
-          return undefined;
-        }
-
-        await tx
-          .insert(walletAccounts)
-          .values({
-            ckbAddress: walletAddress,
-            username: walletAddress,
-            ckbBalance: '0',
-          })
-          .onConflictDoNothing();
-
-        await tx
-          .update(walletAccounts)
-          .set({
-            ckbBalance: sql`(${walletAccounts.ckbBalance}::numeric + ${netPayoutStr}::numeric)::numeric`,
-          })
-          .where(eq(walletAccounts.ckbAddress, walletAddress));
-
-        return u;
-      });
-
-      if (!updatedBet) {
-        throw new Error(
-          'Bet state changed — try again or contact support if funds look wrong.',
-        );
-      }
-
-      const betId = String(updatedBet.id);
-      const amountStr =
-        updatedBet.amount != null ? String(updatedBet.amount) : '0';
-
-      this.gateway.emitCashOut({
-        betId,
-        roundId: r.dbRoundId,
-        ckbAddress: walletAddress,
-        amount: amountStr,
-        tokenSymbol: 'CKB',
-        cashedOutAtMultiplier: mult,
-        profit: amounts?.netProfit ?? 0,
-        winAmount: amounts?.netPayout ?? 0,
-        grossWinAmount: amounts?.grossPayout,
-        platformFee: amounts?.platformFee,
-        cashoutFeeBps: feeBps,
-      });
-
-      return {
-        betId,
-        cashedOutAtMultiplier: mult,
-        profit: amounts?.netProfit ?? 0,
-        grossWinAmount: amounts?.grossPayout,
-        platformFee: amounts?.platformFee,
-        netPayout: amounts?.netPayout,
-        settlementTxHash: null,
-        funding: 'balance',
-      };
-    }
-
     if (!candidate.escrowTxHash?.trim()) {
       throw new Error(
-        'This bet has no on-chain escrow — use pool balance bets or contact support.',
+        'This bet has no on-chain escrow — Pattern A bets must mint escrow; contact support.',
       );
     }
 
